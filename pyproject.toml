@@ -1,13 +1,18 @@
 [project]
 name = "deicide"
 version = "0.1.0"
-description = "Add your description here"
+description = "Split large source files"
 authors = [
     { name = "Jason Lefever", email = "jason.titus.lefever@gmail.com" }
 ]
-dependencies = []
+dependencies = [
+    "click>=8.1.7",
+]
 readme = "README.md"
 requires-python = ">= 3.8"
+
+[project.scripts]
+deicide = "deicide.__main__:cli"
 
 [build-system]
 requires = ["hatchling"]
