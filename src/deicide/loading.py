@@ -14,7 +14,6 @@ class Dataset:
     target_deps_df: pd.DataFrame
     clients_df: pd.DataFrame
     client_deps_df: pd.DataFrame
-    outgoing_type_names: list[str]
     touches_df: pd.DataFrame
 
     def entities_df(self) -> pd.DataFrame:
@@ -24,35 +23,47 @@ class Dataset:
         return pd.concat([self.target_deps_df, self.client_deps_df])    
 
 
-def load_dataset(db_dir: str, project: str, filename: str) -> Dataset:
-    with sqlite3.connect(os.path.join(db_dir, f"{project}.db")) as con:
+def load_dataset(db_path: str, filename: str, commit_id: int) -> Dataset:
+    with sqlite3.connect(db_path) as con:
         db.create_temp_tables(con)
-        lead_ref_name = db.fetch_lead_ref_name(con)
-        files_df = db.fetch_entities_by_name(con, filename)
+        files_df = db.fetch_entities_by_name(con, commit_id, filename)
         files_df = files_df[files_df["kind"] == "file"]
         if len(files_df) < 1:
             raise RuntimeError(f"No files named '{filename}' found")
         if len(files_df) > 1:
             raise RuntimeError(f"Too many files named '{filename}' found")
-        top_id = int(files_df.iloc[0]["id"])
-        targets_df = db.fetch_children(con, lead_ref_name, top_id)
+        file_id = int(files_df.iloc[0]["id"])
+        targets_df = db.fetch_children(con, commit_id, file_id)
+        top_id = file_id
         # If there is only one top level item (e.g. a Java class), skip to its children
         if len(targets_df) == 1:
             top_id = int(targets_df.index[0])
-            targets_df = db.fetch_children(con, lead_ref_name, top_id)
-        target_deps_df = db.fetch_internal_deps(con, str(top_id))
-        clients_df = db.fetch_clients(con, filename)
-        client_deps_df = db.fetch_client_deps(con, top_id, filename)
-        outgoing_type_names = db.fetch_outgoing_type_names(con, top_id)
-        touches_df = db.fetch_touches(con, lead_ref_name, top_id)
+            targets_df = db.fetch_children(con, commit_id, top_id)
+        target_deps_df = db.fetch_internal_deps(con, commit_id, top_id)
+        clients_df = db.fetch_clients(con, commit_id, file_id)
+        client_deps_df = db.fetch_client_deps(con, commit_id, top_id, file_id)
+        touches_df = db.fetch_touches(con, top_id)
         return Dataset(
             targets_df,
             target_deps_df,
             clients_df,
             client_deps_df,
-            outgoing_type_names,
             touches_df,
         )
+
+
+def try_identify_version(db_path: str, version: str) -> int | None:
+    with sqlite3.connect(db_path) as con:
+        df = db.fetch_versions(con)
+    by_ref = df[df["ref_name"] == version]
+    if len(by_ref) > 0:
+        assert len(by_ref) == 1 # DB constraint prevents this
+        return int(by_ref.index[0])
+    by_sha1 = df[df["sha1"] == version]
+    if len(by_sha1) > 0:
+        assert len(by_sha1) == 1 # DB constraint prevents this
+        return int(by_sha1.index[0])
+    return None
 
 
 def load_jdeo_candidates(jdeo_dir: str) -> set[tuple[str, str]]:

@@ -5,4 +5,5 @@ JOIN entities TE ON TE.id = D.tgt_id
 WHERE
     SE.parent_id = :target_id AND
     TE.parent_id = :target_id AND
-    D.src_id <> D.tgt_id
+    D.src_id <> D.tgt_id AND
+    D.commit_id = :commit_id

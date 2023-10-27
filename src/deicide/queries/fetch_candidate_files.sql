@@ -73,9 +73,8 @@ FROM locs
 JOIN member_counts ON member_counts.commit_id = locs.commit_id AND member_counts.entity_id = locs.entity_id
 JOIN fan_ins ON fan_ins.commit_id = locs.commit_id AND fan_ins.file_id = locs.file_id
 JOIN user_counts ON user_counts.file_id = locs.file_id
-JOIN refs ON refs.commit_id = locs.commit_id
 JOIN commits ON commits.id = locs.commit_id
-WHERE refs.name = :ref_name
+WHERE locs.commit_id = :commit_id
 -- AND locs.loc >= :min_locs
 -- AND (user_counts.author_count > 1 OR user_counts.committer_count > 1)
 AND locs.filename NOT LIKE '%/test/%'

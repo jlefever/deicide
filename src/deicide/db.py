@@ -22,49 +22,55 @@ def create_temp_tables(con: Con):
     con.executescript(_get_query("_prelude"))
 
 
-def fetch_candidate_files(con: Con, ref_name: str) -> pd.DataFrame:
-    params = {"ref_name": ref_name}
+def fetch_candidate_files(con: Con, commit_id: int) -> pd.DataFrame:
+    params = {"commit_id": commit_id}
     return pd.read_sql(_get_query_by_caller_name(), con, params=params)
 
 
-def fetch_children(con: Con, ref_name: str, target_id: int) -> pd.DataFrame:
-    params = {"ref_name": ref_name, "target_id": str(target_id)}
+def fetch_candidate_files2(con: Con, commit_id: int, n: int) -> pd.DataFrame:
+    params = {"commit_id": commit_id, "n": n}
+    return pd.read_sql(_get_query_by_caller_name(), con, params=params)
+
+
+def fetch_children(con: Con, commit_id: int, target_id: int) -> pd.DataFrame:
+    params = {"commit_id": commit_id, "target_id": str(target_id)}
     return pd.read_sql(_get_query_by_caller_name(), con, index_col="id", params=params)
 
 
-def fetch_client_deps(con: Con, target_id: int, target_file: str) -> pd.DataFrame:
-    params = {"target_id": str(target_id), "target_file": target_file}
+def fetch_client_deps(
+    con: Con, commit_id: int, target_id: int, file_id: str
+) -> pd.DataFrame:
+    params = {
+        "commit_id": commit_id,
+        "target_id": str(target_id),
+        "file_id": file_id,
+    }
     return pd.read_sql(_get_query_by_caller_name(), con, params=params)
 
 
-def fetch_clients(con: Con, target_file: str) -> pd.DataFrame:
-    params = {"target_file": target_file}
+def fetch_clients(con: Con, commit_id: int, file_id: int) -> pd.DataFrame:
+    params = {"commit_id": commit_id, "file_id": file_id}
     return pd.read_sql(_get_query_by_caller_name(), con, index_col="id", params=params)
 
 
-def fetch_entities_by_name(con: Con, name: str) -> pd.DataFrame:
-    params = {"name": name}
+def fetch_entities_by_name(con: Con, commit_id: int, name: str) -> pd.DataFrame:
+    params = {"commit_id": commit_id, "name": name}
     return pd.read_sql(_get_query_by_caller_name(), con, params=params)
 
 
-def fetch_internal_deps(con: Con, target_id: int) -> pd.DataFrame:
-    params = {"target_id": str(target_id)}
+def fetch_internal_deps(con: Con, commit_id: int, target_id: int) -> pd.DataFrame:
+    params = {"commit_id": commit_id, "target_id": str(target_id)}
     return pd.read_sql(_get_query_by_caller_name(), con, params=params)
-
-
-def fetch_outgoing_type_names(con: Con, target_id: int) -> list[str]:
-    params = {"target_id": str(target_id)}
-    return list(pd.read_sql(_get_query_by_caller_name(), con, params=params)["name"])
 
 
 def fetch_refs(con: Con) -> pd.DataFrame:
     return pd.read_sql(_get_query_by_caller_name(), con)
 
 
-def fetch_touches(con: Con, ref_name: str, target_id: str) -> pd.DataFrame:
-    params = {"ref_name": ref_name, "target_id": str(target_id)}
+def fetch_touches(con: Con, target_id: str) -> pd.DataFrame:
+    params = {"target_id": str(target_id)}
     return pd.read_sql(_get_query_by_caller_name(), con, params=params)
 
 
-def fetch_lead_ref_name(con: Con) -> str:
-    return fetch_refs(con).iloc[0]["name"]
+def fetch_versions(con: Con) -> pd.DataFrame:
+    return pd.read_sql(_get_query_by_caller_name(), con, index_col="commit_id")

@@ -19,6 +19,9 @@ JOIN temp.ancestors A ON A.entity_id = E.id
 JOIN entities FE ON FE.id = A.ancestor_id
 WHERE FE.parent_id IS NULL;
 
+CREATE INDEX temp.idx_filenames_entity_id ON filenames(entity_id);
+CREATE INDEX temp.idx_filenames_file_id ON filenames(file_id);
+
 CREATE TEMP TABLE IF NOT EXISTS temp.levels AS
 WITH RECURSIVE levels (entity_id, level) AS
 (
