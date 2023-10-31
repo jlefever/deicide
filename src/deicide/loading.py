@@ -66,6 +66,12 @@ def try_identify_version(db_path: str, version: str) -> int | None:
     return None
 
 
+def fetch_latest_commit_id(db_path: str) -> int:
+    with sqlite3.connect(db_path) as con:
+        df = db.fetch_versions(con)
+        return df.sort_values("date", ascending=False).index[0]
+
+
 def load_jdeo_candidates(jdeo_dir: str) -> set[tuple[str, str]]:
     jdeo_candidates = set()
 
@@ -89,9 +95,11 @@ def load_candidates_df(db_dir: str) -> pd.DataFrame:
         print(f"Finding candidates in {db_name}...")
         with sqlite3.connect(os.path.join(db_dir, db_name)) as con:
             db.create_temp_tables(con)
-            ref_name = db.fetch_lead_ref_name(con)
-            project_candidates_df = db.fetch_candidate_files(con, ref_name)
+            versions_df = db.fetch_versions(con)
+            commit_id = int(versions_df.sort_values("date", ascending=False).index[0])
+            project_candidates_df = db.fetch_candidate_files(con, commit_id)
             project_candidates_df["id"] = project_candidates_df["id"].map(lambda x: f"{project_name}-{x}")
+            project_candidates_df.insert(1, "commit_id", commit_id)
             project_candidates_df.insert(1, "project", project_name)
             candidates_dfs.append(project_candidates_df)
 

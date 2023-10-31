@@ -9,5 +9,10 @@ wheels/
 # venv
 .venv
 
-.DS_Store
+**/.DS_Store
 data
+data-db
+data-jd
+results/
+output.xlsx
+~$output.xlsx
