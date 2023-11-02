@@ -1,7 +1,6 @@
-from html import entities
 from os.path import commonprefix
 from functools import cache, cached_property
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Iterable, Any
 from itertools import combinations
 
@@ -100,6 +99,9 @@ class Clustering:
     def pairs(self) -> frozenset[tuple[int, ClusterPath]]:
         return self._pairs
 
+    def union(self, other: "Clustering") -> "Clustering":
+        return Clustering(self.pairs | other.pairs)
+
     def subset(self, entities: set[int]) -> "Clustering":
         return Clustering((e, c) for e, c in self.pairs if e in entities)
 
@@ -150,20 +152,20 @@ class Clustering:
     def replace_root(self, root: ClusterPath) -> "Clustering":
         return self.without_root().with_root(root)
 
-    def with_isolated(self, entities: Iterable[int], prefix: str = "I") -> "Clustering":
+    def with_isolated(self, entities: Iterable[int]) -> "Clustering":
+        # This does not consider the rare case where an existing cluster
+        # happens to have the same name as an entity id 
         isolated = sorted(set(entities) - self.entities())
-        pairs = {(e, ClusterPath(f"{prefix}{i + 1}")) for i, e in enumerate(isolated)}
+        pairs = {(e, ClusterPath(str(e))) for e in isolated}
         return Clustering(pairs | self.pairs)
 
     def normalize(self) -> "Clustering":
         clustering = self.without_root()
         entities = clustering.entities()
-        # Remove any cluster that 1) contains only a single entity AND 2) is not that entity's only cluster
+        # Remove any cluster that both
+        # 1) contains only a single entity
+        # 2) is not that entity's only cluster
         return clustering.without_singletons().with_isolated(entities)
-
-    # def normalize2(self) -> "Clustering":
-    #     clustering = self.without_root()
-    #     res = [(e, c) for e, c in self.pairs if ]
 
     @cache
     def entities(self) -> set[int]:
@@ -181,35 +183,9 @@ class Clustering:
 
     @cache
     def singleton_entities(self) -> dict[int, ClusterPath]:
-        counter = Counter(c for (_, c) in self.pairs)
-        singletons = (c for c in self.clusters() if counter[c] == 1)
-        return {c: single(self.entities_for(c)) for c in singletons}
-
-    # @cache
-    # def exclusive_clusters(self) -> set[ClusterPath]:
-    #     exclusive_clusters = set()
-    #     for entity in self.singleton_entities():
-    #         if
-
-    @cache
-    def exclusive_entities(self) -> set[int]:
-        pass
-
-    @cache
-    def unique_clusters(self) -> set[ClusterPath]:
-        pass
-
-    @cache
-    def unique_entities(self) -> set[int]:
-        pass
-
-    def useless_clusters(self) -> set[ClusterPath]:
-        ret = set()
-        for cluster in self.singleton_clusters():
-            entity = next(iter(self.entities_for(cluster)))
-            if entity not in self.singleton_entities():
-                ret.add(cluster)
-        return ret
+        counter = Counter(e for (e, _) in self.pairs)
+        singletons = (e for e in self.entities() if counter[e] == 1)
+        return {c: single(self.clusters_for(c)) for c in singletons}
 
     @cache
     def num_levels(self) -> int:
@@ -247,22 +223,24 @@ class Clustering:
         return arr
 
 
-def is_useful_cluster(clustering: Clustering, cluster: ClusterPath) -> bool:
-    # assuming cluster belongs to clustering
-    if cluster not in clustering.singleton_clusters():
-        return True
-
-    entities = clustering.entities_for(cluster)
-    assert len(entities) == 1
-    entity = next(iter(entities))
-
-    return entity in clustering.singleton_entities()
+def to_alpha(num: int) -> str:
+    if num < 0:
+        raise ValueError("num must be nonnegative")
+    chars: list[str] = []
+    num = num + 1
+    while num > 0:
+        mod = (num - 1) % 26
+        chars.append(chr(65 + mod))
+        num = (num - mod) // 26
+    return "".join(reversed(chars))
 
 
 def to_my_clustering(entities_df: pd.DataFrame) -> Clustering:
     triples = ((id, r["block_name"], r["kind"]) for id, r in entities_df.iterrows())
     return Clustering(
-        (e, ClusterPath(c.split("."))) for e, c, k in triples if k != "file"  # type: ignore
+        (e, ClusterPath(c.split(".")))
+        for e, c, k in triples
+        if k != "file"  # type: ignore
     )
 
 

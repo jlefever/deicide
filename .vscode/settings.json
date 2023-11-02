@@ -1,3 +1,7 @@
 {
-    "jupyter.notebookFileRoot": "${workspaceFolder}"
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "python.analysis.typeCheckingMode": "strict",
+    "python.languageServer": "Pylance",
+    "python.testing.pytestEnabled": false,
+    "jupyter.notebookFileRoot": "${workspaceFolder}",
 }

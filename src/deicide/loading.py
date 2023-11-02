@@ -69,7 +69,7 @@ def try_identify_version(db_path: str, version: str) -> int | None:
 def fetch_latest_commit_id(db_path: str) -> int:
     with sqlite3.connect(db_path) as con:
         df = db.fetch_versions(con)
-        return df.sort_values("date", ascending=False).index[0]
+        return int(df.sort_values("date", ascending=False).index[0])
 
 
 def load_jdeo_candidates(jdeo_dir: str) -> set[tuple[str, str]]:
