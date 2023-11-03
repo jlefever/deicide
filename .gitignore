@@ -16,3 +16,5 @@ data-jd
 results/
 output.xlsx
 ~$output.xlsx
+cache/
+deicide.log
