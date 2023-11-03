@@ -6,6 +6,7 @@ from itertools import combinations
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 from ordered_set import OrderedSet as oset
 
 from deicide.jdeo import JDeoRow
@@ -212,7 +213,7 @@ class Clustering:
         return e2c
 
     @cache
-    def ndarray(self) -> np.ndarray:
+    def ndarray(self) -> NDArray[np.float64]:
         clusters = oset(sorted(self.clusters()))
         entities = oset(sorted(self.entities()))
         arr = np.zeros((len(clusters), len(entities)))
@@ -249,11 +250,11 @@ def to_my_clustering_with_files(entities_df: pd.DataFrame) -> Clustering:
     return Clustering((e, ClusterPath(c.split("."))) for e, c in pairs)  # type: ignore
 
 
-def to_jdeo_clustering(jdeo_id_map: dict[JDeoRow, int]) -> Clustering:
+def to_jdeo_clustering(jdeo_id_map: dict[JDeoRow, int | None]) -> Clustering:
     return Clustering(
         (id, ClusterPath(row.cluster.split(".")))
         for row, id in jdeo_id_map.items()
-        if id != None
+        if id is not None
     )
 
 

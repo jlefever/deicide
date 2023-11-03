@@ -5,10 +5,11 @@ License: BSD 3-Clause
 """
 
 import numpy as np
+from numpy.typing import NDArray
 
 __version__ = '1.0'
 
-def grand_index(u, v, adjusted=False):
+def grand_index(u: NDArray[np.float64], v: NDArray[np.float64], adjusted: bool=False) -> float:
     """
     Grand Index (13GRI) and Adjusted Grand Index (13AGRI) implementations.
     

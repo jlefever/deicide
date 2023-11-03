@@ -42,7 +42,7 @@ def load_jdeo_subject(jdeo_dir: str, project: str, filename: str) -> list[JDeoRo
 
 def match_entities(
     jdeo_rows: list[JDeoRow], targets_df: pd.DataFrame
-) -> dict[JDeoRow, int]:
+) -> dict[JDeoRow, int | None]:
     # Both our data and JDeo's data include line numbers. However, JDeo starts
     # counting at the doc comment while ours skips this and starts counting at
     # the signature. So instead of using the exact line number, we use the
