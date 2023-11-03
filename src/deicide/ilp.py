@@ -146,10 +146,10 @@ def partition2(
     for i in nodes:
         model.AddExactlyOne([x[i, s] for s in parts])
 
-    # Constraint: No part must be larger than a certain bound.
+    # Constraint: All parts are be bounded in size.
     for s in parts:
         model.AddLinearConstraint(
-            sum(node_weight(i) * x[i, s] for i in nodes), 0, bound
+            sum(node_weight(i) * x[i, s] for i in nodes), 1, bound
         )
 
     # Constraint: Mark the cut edges as one if they are in different parts.

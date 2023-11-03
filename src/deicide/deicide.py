@@ -1,4 +1,5 @@
 import time
+import logging
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,17 @@ from deicide import ilp
 from deicide.graph import group_by_scc, group_by_wcc, group_edges_by
 from deicide.loading import Dataset
 from deicide.naming import NameSimilarity
+
+
+logging.basicConfig(
+    filename="deicide.log",
+    encoding="utf-8",
+    level=logging.DEBUG,
+    filemode="w",
+    format="%(asctime)s.%(msecs)03d %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 
 # Text Options
 TEXT_SIM_LOOKBACK = 1     # Set this "1" for normal bigrams
@@ -22,7 +34,7 @@ UNIT_EDGE_WEIGHT = 4096
 CUT_EPS = 0.1
 
 # When to stop splitting
-WEIGHT_THRESH = 8
+WEIGHT_THRESH = 8 # change to 7
 
 
 def group_sim(
@@ -78,7 +90,7 @@ def create_txt_edges(
 
 
 # This function was extracted from a Jupyter notebook.
-def cluster_dataset(ds: Dataset, quite: bool = False) -> pd.DataFrame:
+def cluster_dataset(ds: Dataset, *, use_threshold: bool) -> pd.DataFrame:
     # This dataframe contains both members of the god file and dependent and dependee files
     entities_df = ds.entities_df()
     edges = oset((r["src_id"], r["tgt_id"]) for _, r in ds.deps_df().iterrows())
@@ -146,35 +158,43 @@ def cluster_dataset(ds: Dataset, quite: bool = False) -> pd.DataFrame:
         Returns:
         A dict mapping `strong_id`s to a cluster name
         """
-        # Print info
-        timestamp = time.strftime("%H:%M:%S", time.localtime())
-        prefix = f"[{cluster_name}]".ljust(18) + f" ({timestamp}) "
-        if not quite:
-            print(prefix + f"Starting... ({len(active)} nodes)", end="\t")
-
-        default_res = {i: cluster_name for i in active}
-
-        if sum(get_strong_weight(strong_id) for strong_id in active) <= WEIGHT_THRESH:
-            if not quite:
-                print("Aborted. Weight under threshold.")
-            return default_res
-
         def w(strong_id: int) -> int:
             if strong_id not in active:
                 return 0
             return get_strong_weight(strong_id)
+
+        # Print info
+        n_active_entities = len([a for a in active if get_strong_weight(a) > 0])
+        logging.info(f"[{cluster_name}] Starting... ({n_active_entities} entities)")
+        logging.debug("======================================")
+        active_nodes = {n: w(n) for n in active}
+        active_dep_edges = {(u, v): get_edge_weight(u, v) for u, v in dep_edges if u in active and v in active}
+        active_txt_edges = {(u, v): get_edge_weight(u, v) for u, v in txt_edges if u in active and v in active}
+        logging.debug(sorted(list(active_nodes.items())))
+        logging.debug(sorted(list(active_dep_edges.items())))
+        logging.debug(sorted(list(active_txt_edges.items())))
+        logging.debug("======================================")
+
+        default_res = {i: cluster_name for i in active}
+
+        if use_threshold:
+            if sum(get_strong_weight(strong_id) for strong_id in active) <= WEIGHT_THRESH:
+                logging.info("Aborted. Weight under threshold.")
+                return default_res
+        else:
+            if n_active_entities < 2:
+                logging.info("Aborted. Nothing left to cluster.")
+                return default_res
 
         start = time.perf_counter()
         cut_weight, labels = ilp.partition2(
             dep_edges, txt_edges, w, get_edge_weight, 2, CUT_EPS, 10
         )
         if labels is None:
-            if not quite:
-                print("Aborted. Failed to partition.")
+            logging.error("Aborted. Failed to partition.")
             return default_res
         elapsed = time.perf_counter() - start
-        if not quite:
-            print(f"Bisected with a cut weight of {cut_weight} in {elapsed:0.4f} secs.")
+        logging.info(f"Bisected with a cut weight of {cut_weight} in {elapsed:0.4f} secs.")
 
         active_A = active & {i for i, l in labels.items() if l == 0}
         active_B = active & {i for i, l in labels.items() if l == 1}
