@@ -1,5 +1,4 @@
 import enum
-import random
 from collections import Counter
 from functools import cache
 
@@ -10,21 +9,14 @@ from gensim.parsing.preprocessing import preprocess_string
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
 
+from deicide.algorithms import core
 from deicide import naming
-from deicide.algorithms import hac
 from deicide.loading import Dataset
 from deicide.validation2 import Clustering
 
 
 Doc = list[str]
 Corpus = list[list[tuple[int, int]]]
-
-
-def jaccard(a: set[int], b: set[int]) -> float:
-    union = len(a | b)
-    if union == 0:
-        return 0.0
-    return len(a & b) / union
 
 
 def split(docs: list[Doc], ratio: float = 0.20) -> tuple[list[Doc], list[Doc]]:
@@ -109,7 +101,7 @@ class GodClass:
 
     @cache
     def ssm(self, u: int, v: int) -> float:
-        return jaccard(self.usages(u), self.usages(v))
+        return core.jaccard(self.usages(u), self.usages(v))
 
     @cache
     def directed_cdm(self, u: int, v: int) -> float:
@@ -188,7 +180,7 @@ class GodClass:
         return entity
 
 
-class AkashDist(hac.Dist):
+class AkashDist(core.Dist):
     def __init__(self, god_class: GodClass):
         self._god_class = god_class
 
@@ -196,21 +188,21 @@ class AkashDist(hac.Dist):
         return self._god_class.dist(a, b)
 
 
-def akash19(god_class: GodClass, threshold: float, seed: int | None) -> Clustering:
+def akash19(god_class: GodClass, *, shuffle: bool) -> Clustering:
     ids = {m.id for m in god_class.methods()}
-    link_dist = hac.AvgLinkDist(AkashDist(god_class))
-    return hac.hac(ids, link_dist, threshold, seed).to_clustering()
+    link_dist = core.AvgLinkDist(AkashDist(god_class))
+    return core.hac(ids, link_dist, shuffle=shuffle).to_clustering()
 
 
-def many_akash19(
-    god_class: GodClass, n_trails: int, threshold_range: tuple[float, float]
-) -> list[Clustering]:
-    thresh_min, thresh_max = threshold_range
-    clusterings: list[Clustering] = []
-    for _ in range(n_trails):
-        threshold = random.uniform(thresh_min, thresh_max)
-        clusterings.append(akash19(god_class, threshold, None))
-    return clusterings
+# def many_akash19(
+#     god_class: GodClass, n_trails: int, threshold_range: tuple[float, float]
+# ) -> list[Clustering]:
+#     thresh_min, thresh_max = threshold_range
+#     clusterings: list[Clustering] = []
+#     for _ in range(n_trails):
+#         threshold = random.uniform(thresh_min, thresh_max)
+#         clusterings.append(akash19(god_class, threshold, None))
+#     return clusterings
 
 
 def tokenize_identifiers(identifiers: str) -> list[str]:

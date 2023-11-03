@@ -32,6 +32,7 @@ def split_camal(name: str) -> list[str]:
     return join_singles([name[a:b].lower() for a, b in pairwise(indices)])
 
 
+@cache
 def split_identifier(name: str) -> list[str]:
     by_spaces = name.split(" ")
     by_underscores = chain(*(z.split("_") for z in by_spaces))
