@@ -40,7 +40,7 @@ def load_dataset(db_path: str, filename: str, commit_id: int) -> Dataset:
             top_id = int(targets_df.index[0])
             targets_df = db.fetch_children(con, commit_id, top_id)
         target_deps_df = db.fetch_internal_deps(con, commit_id, top_id)
-        clients_df = db.fetch_clients(con, commit_id, file_id)
+        clients_df = db.fetch_clients(con, commit_id, top_id, file_id)
         client_deps_df = db.fetch_client_deps(con, commit_id, top_id, file_id)
         touches_df = db.fetch_touches(con, top_id)
         return Dataset(
