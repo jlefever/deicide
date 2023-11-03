@@ -4,4 +4,7 @@
     "python.languageServer": "Pylance",
     "python.testing.pytestEnabled": false,
     "jupyter.notebookFileRoot": "${workspaceFolder}",
+    "python.analysis.extraPaths": [
+        "./src/notebooks"
+    ],
 }
