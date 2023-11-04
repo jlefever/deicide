@@ -177,8 +177,8 @@ def hac(
         raise ValueError("need at least one id")
     clusters: list[Cluster] = [Leaf([id]) for id in ids]
     while len(clusters) > 1:
-        (a, b), min_dist, all_equal = link_dist.find_min(clusters, shuffle=shuffle)
-        if all_equal or min_dist >= threshold:
+        (a, b), min_dist, _ = link_dist.find_min(clusters, shuffle=shuffle)
+        if min_dist >= threshold:
             return Branch(clusters)
         clusters.remove(a)
         clusters.remove(b)
@@ -192,25 +192,29 @@ def greedy_hac(
     *,
     shuffle: bool,
     threshold: float = math.inf,
-) -> Branch:
+) -> Cluster:
     if len(ids) == 0:
         raise ValueError("need at least one id")
     clusters: list[Cluster] = []
     singletons: list[Cluster] = [Leaf([id]) for id in ids]
     while len(singletons) > 1:
-        (a, b), min_dist, all_equal = link_dist.find_min(singletons, shuffle=shuffle)
-        if all_equal or min_dist > threshold:
+        (a, b), min_dist, _ = link_dist.find_min(singletons, shuffle=shuffle)
+        if min_dist > threshold:
             break
         root = Branch([a, b])
         singletons.remove(a)
         singletons.remove(b)
         while len(singletons) > 0:
-            (a, b), min_dist, all_equal = link_dist.find_min(
+            (a, b), min_dist, _ = link_dist.find_min(
                 [root], singletons, shuffle=shuffle
             )
-            if all_equal or min_dist > threshold:
+            if min_dist > threshold:
                 break
             root = Branch([root, b])
             singletons.remove(b)
         clusters.append(root)
-    return Branch(clusters + singletons)
+    res = clusters + singletons
+    if len(res) > 1:
+        return Branch(clusters + singletons)
+    else:
+        return res[0]

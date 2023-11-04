@@ -52,7 +52,7 @@ class AlzahraniDist(core.Dist):
 
 def merge_small_clusters(
     branch: core.Branch, link_dist: core.LinkDist, *, min_size: int = 2
-) -> core.Branch:
+) -> core.Cluster:
     # I appologize for this God awful implementation.
     # Note: The behavior seems to depend on the order of the clusters. I am not
     # sure if this desired but I want to stay true to the oringal paper.
@@ -78,8 +78,8 @@ def merge_small_clusters(
             if dist < min_dist:
                 min_dist = dist
                 min_cluster = remaining_cluster
-        all_equal = all(d == min_dist for d in dists)
-        if min_cluster is not None and not all_equal:
+        # all_equal = all(d == min_dist for d in dists)
+        if min_cluster is not None:
             to_be_removed.append(min_cluster)
             to_be_removed.append(cluster)
             to_be_added.append(core.Branch([min_cluster, cluster]))
@@ -87,18 +87,28 @@ def merge_small_clusters(
     res.extend(to_be_added)
     for c in to_be_removed:
         res.remove(c)
-    return core.Branch(res)
+    if len(res) > 1:
+        return core.Branch(res)
+    else:
+        return res[0]
 
 
-def alzahrani20(god_class: GodClass, *, shuffle: bool) -> Clustering:
+def alzahrani20(god_class: GodClass, *, use_merge: bool, use_threshold: bool, shuffle: bool) -> Clustering:
+    if use_threshold:
+        threshold = god_class.get_recommended_threshold()
+    else:
+        threshold = math.inf
     link_dist = core.AvgLinkDist(AlzahraniDist(god_class))
     cluster = core.greedy_hac(
         ids=god_class.methods,
         link_dist=link_dist,
-        threshold=god_class.get_recommended_threshold(),
+        threshold=threshold,
         shuffle=shuffle,
     )
-    return merge_small_clusters(cluster, link_dist).to_clustering()
+    if use_merge and isinstance(cluster, core.Branch):
+        return merge_small_clusters(cluster, link_dist).to_clustering()
+    else:
+        return cluster.to_clustering()
 
 
 def to_godclass(ds: Dataset) -> GodClass:

@@ -34,7 +34,7 @@ UNIT_EDGE_WEIGHT = 4096
 CUT_EPS = 0.1
 
 # When to stop splitting
-WEIGHT_THRESH = 8 # change to 7
+WEIGHT_THRESH = 7
 
 
 def group_sim(

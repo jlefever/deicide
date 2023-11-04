@@ -1,10 +1,13 @@
 import sqlite3
 
 import click
+import pandas as pd
 from tabulate import tabulate
 
+import deicide.validation2 as vd
+import deicide.dendrogram as dg
 from deicide import db, loading
-from deicide.clustering import cluster_dataset
+from deicide.deicide import cluster_dataset
 
 
 @click.group()
@@ -40,13 +43,20 @@ def parse_version(db_path: str, version: str) -> int:
     required=True,
     help="Filename of file to split (must be inside the db)",
 )
-def split(db_path: str, version: str, target: str):
+@click.option(
+    "output",
+    "--output",
+    default="output.xlsx",
+    help="Filename of output Excel spreadsheet"
+)
+def split(db_path: str, version: str, target: str, output: str):
     commit_id = parse_version(db_path, version)
     print("Loading file...")
     ds = loading.load_dataset(db_path, target, commit_id)
-    # print("Clustering...")
-    # entities_df = cluster_dataset(ds)
-    # print(tabulate(entities_df, headers="keys", tablefmt="psql"))
+    print("Clustering...")
+    entities_df = cluster_dataset(ds)
+    my_clustering = vd.to_my_clustering(entities_df).normalize()
+    dg.dump_indicators(entities_df, output, my_clx=my_clustering)
 
 
 @cli.command()
@@ -88,6 +98,7 @@ def list_candidates(db_path: str, version: str, n: int):
 def list_versions(db_path: str):
     with sqlite3.connect(db_path) as con:
         df = db.fetch_versions(con)
+    df["date"] = pd.to_datetime(df["date"], unit="s")
     print(tabulate(df, headers="keys", tablefmt="psql"))
 
 cli()
