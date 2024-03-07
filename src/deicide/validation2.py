@@ -42,6 +42,12 @@ class ClusterPath:
         return _CLUSTER_PATH_SEP.join(self.segments)
 
     @cache
+    def parent(self) -> "ClusterPath | None":
+        if len(self) <= 1:
+            return None
+        return self[0:len(self) - 1]
+
+    @cache
     def ancestors(self) -> list["ClusterPath"]:
         return [self[0:i] for i in range(1, len(self))]
 
