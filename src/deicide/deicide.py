@@ -1,223 +1,400 @@
-import time
-import logging
+from collections import defaultdict
+from enum import Enum
+from itertools import product
+from math import ceil
+from typing import Callable
 
-import numpy as np
-import pandas as pd
-from ordered_set import OrderedSet as oset
+from ortools.sat.python import cp_model
+from ortools.sat.python.cp_model import IntVar
 
-from deicide import ilp
-from deicide.graph import group_by_scc, group_by_wcc, group_edges_by
-from deicide.loading import Dataset
-from deicide.naming import NameSimilarity
-
-
-logging.basicConfig(
-    filename="deicide.log",
-    encoding="utf-8",
-    level=logging.DEBUG,
-    filemode="w",
-    format="%(asctime)s.%(msecs)03d %(levelname)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+from deicide.core import Dep, Entity
 
 
-# Text Options
-TEXT_SIM_LOOKBACK = 1     # Set this "1" for normal bigrams
-ALLOW_DUP_NAMES = True    # Should the sample space (for name similarity) be a set or multi-set?
-TEXT_EDGE_MIN_SIM = 0.25  # Lower values take longer but use more available information
-TEXT_EDGE_MULTIPLIER = 1  # Set to "0" to disable
+def deicide(
+    targets: list[Entity],
+    clients: list[Entity],
+    internal_deps: list[Dep],
+    client_deps: list[Dep],
+) -> list[tuple[str, list[int]]]:
+    # Set up graph
+    entities = targets + clients
+    id_to_ix: dict[str, int] = {e.id: ix for ix, e in enumerate(entities)}
+    di_edges: set[tuple[int, int]] = set()
+    for dep in internal_deps:
+        di_edges.add((id_to_ix[dep.src_id], id_to_ix[dep.tgt_id]))
+    for dep in client_deps:
+        di_edges.add((id_to_ix[dep.src_id], id_to_ix[dep.tgt_id]))
 
-# All edges weights are multiplied by this then rounded to the nearest integer
-UNIT_EDGE_WEIGHT = 4096
+    def get_node_weight(ix: int) -> int:
+        return 1 if ix < len(targets) else 0
 
-# Balance paramater
-CUT_EPS = 0.1
+    def get_edge_weight(src_ix: int, tgt_ix: int) -> int:
+        return 1
 
-# When to stop splitting
-WEIGHT_THRESH = 7
+    # Run cluster algorithm
+    nodes = set(range(len(entities)))
+    res = _cluster(nodes, di_edges, set(), get_node_weight, get_edge_weight)
 
+    # Return clustering
+    # memberships: list[tuple[str, ClusterPath]] = []
+    # for ix, entity in enumerate(targets):
+    #     path = ClusterPath([f"M{label}" for label in res[ix]])
+    #     memberships.append((entity.id, path))
+    # return Clustering(memberships)
 
-def group_sim(
-    sim: NameSimilarity, a_names: list[str], b_names: list[str]
-) -> list[float]:
-    """Return a list of similarity scores between these two groups."""
-    # Filenames are not included in our similarity comparison
-    a_names = [n for n in a_names if sim.has_doc(n)]
-    b_names = [n for n in b_names if sim.has_doc(n)]
-    weights = []
-    for a_name in a_names:
-        for b_name in b_names:
-            weights.append(sim.sim(a_name, b_name))
-    return weights
-
-
-def min_group_sim(sim: NameSimilarity, a_names: list[str], b_names: list[str]):
-    """Return similarity score between the two groups using min-linkage."""
-    weights = group_sim(sim, a_names, b_names)
-    return np.min(weights) if len(weights) != 0 else 0
-
-
-def avg_group_sim(sim: NameSimilarity, a_names: list[str], b_names: list[str]):
-    """Return similarity score between the two groups using average-linkage."""
-    weights = group_sim(sim, a_names, b_names)
-    return np.average(weights) if len(weights) != 0 else 0
+    # Return clustering
+    memberships: list[tuple[str, list[int]]] = []
+    for ix, entity in enumerate(targets):
+        memberships.append((entity.id, res[ix]))
+    return memberships
 
 
-def max_group_sim(sim: NameSimilarity, a_names: list[str], b_names: list[str]):
-    """Return similarity score between the two groups using max-linkage."""
-    weights = group_sim(sim, a_names, b_names)
-    return np.max(weights) if len(weights) != 0 else 0
+class _Linkage(Enum):
+    SINGLE = 0
+    AVERAGE = 1
+    COMPLETE = 2
 
 
-def create_txt_edges(
-    entities_df: pd.DataFrame, sim: NameSimilarity
-) -> dict[tuple[int, int], float]:
-    """Return a dict with text edges as keys and similarity scores as values. The edges
-    are between `strong_id`s.
-    """
-    edges = {}
-    nonfiles = entities_df[entities_df["kind"] != "file"]
-    strong_names = nonfiles.groupby("strong_id")["name"].apply(list).to_dict()
-    strong_ids = list(strong_names.keys())
-    for a_ix in range(len(strong_ids)):
-        a_names = strong_names[a_ix]
-        for b_ix in range(a_ix + 1, len(strong_ids)):
-            b_names = strong_names[b_ix]
-            score = max_group_sim(sim, a_names, b_names)
-            if score >= TEXT_EDGE_MIN_SIM:
-                edges[(a_ix, b_ix)] = score
-    return edges
+def _cluster(
+    nodes: set[int],
+    di_edges: set[tuple[int, int]],
+    un_edges: set[tuple[int, int]],
+    node_weight: Callable[[int], int],
+    edge_weight: Callable[[int, int], int],
+    k: int = 2,
+    eps: float = 0.1,
+    linkage: _Linkage = _Linkage.COMPLETE,
+    min_node_weight: int = 2,
+    max_time_in_seconds: float | None = 30,
+) -> dict[int, list[int]]:
+    node_to_scc = _find_scc(nodes, di_edges)
+    scc_to_nodes: dict[int, set[int]] = defaultdict(set)
+    for node, scc in node_to_scc.items():
+        scc_to_nodes[scc].add(node)
 
+    strong_nodes = set(scc_to_nodes.keys())
 
-# This function was extracted from a Jupyter notebook.
-def cluster_dataset(ds: Dataset, *, use_threshold: bool) -> pd.DataFrame:
-    # This dataframe contains both members of the god file and dependent and dependee files
-    entities_df = ds.entities_df()
-    edges = oset((r["src_id"], r["tgt_id"]) for _, r in ds.deps_df().iterrows())
+    strong_di_edges = {(node_to_scc[a], node_to_scc[b]) for a, b in di_edges}
+    strong_di_edges = {(a, b) for a, b in strong_di_edges if a != b}
 
-    # Create an object for lexically comparing entity names
-    similarity = NameSimilarity(
-        list(ds.targets_df["name"]),
-        allow_dup_names=ALLOW_DUP_NAMES,
-        lookback=TEXT_SIM_LOOKBACK,
+    strong_un_edges = {(node_to_scc[a], node_to_scc[b]) for a, b in un_edges}
+    strong_un_edges = {(a, b) for a, b in strong_un_edges if a != b}
+
+    def strong_node_weight(scc: int) -> int:
+        return sum(node_weight(node) for node in scc_to_nodes[scc])
+
+    if linkage == _Linkage.SINGLE:
+
+        def strong_edge_weight(scc_a: int, scc_b: int) -> int:
+            a_nodes = scc_to_nodes[scc_a]
+            b_nodes = scc_to_nodes[scc_b]
+            return min(edge_weight(a, b) for a, b in product(a_nodes, b_nodes))
+
+    elif linkage == _Linkage.AVERAGE:
+
+        def strong_edge_weight(scc_a: int, scc_b: int) -> int:
+            a_nodes = scc_to_nodes[scc_a]
+            b_nodes = scc_to_nodes[scc_b]
+            values = [edge_weight(a, b) for a, b in product(a_nodes, b_nodes)]
+            return round(sum(values) / len(values))
+
+    elif linkage == _Linkage.COMPLETE:
+
+        def strong_edge_weight(scc_a: int, scc_b: int) -> int:
+            a_nodes = scc_to_nodes[scc_a]
+            b_nodes = scc_to_nodes[scc_b]
+            return max(edge_weight(a, b) for a, b in product(a_nodes, b_nodes))
+
+    else:
+        raise RuntimeError
+
+    scc_to_path = _cluster_dag(
+        strong_nodes,
+        strong_di_edges,
+        strong_un_edges,
+        strong_node_weight,
+        strong_edge_weight,
+        k,
+        eps,
+        min_node_weight,
+        max_time_in_seconds,
     )
 
-    # Create a `name_id`` for each entity that groups targets according to their name
-    entities_df["name_id"] = entities_df.groupby("name").ngroup()
+    node_to_path: dict[int, list[int]] = dict()
+    for node, scc in node_to_scc.items():
+        node_to_path[node] = scc_to_path[scc]
+    return node_to_path
 
-    # Create a `strong_id`` for each entity that groups targets according the strongly
-    # connected component of their name
-    name_edges = group_edges_by(edges, entities_df["name_id"])
-    entities_df["strong_id"] = group_by_scc(entities_df["name_id"], name_edges)
 
-    # Create a `weak_id` for each entity that groups targets according the weakly
-    # connected component of their strong_id
-    strong_edges = group_edges_by(edges, entities_df["strong_id"])
-    entities_df["weak_id"] = group_by_wcc(entities_df["strong_id"], strong_edges)
+def _cluster_dag(
+    nodes: set[int],
+    di_edges: set[tuple[int, int]],
+    un_edges: set[tuple[int, int]],
+    node_weight: Callable[[int], int],
+    edge_weight: Callable[[int, int], int],
+    k: int,
+    eps: float,
+    min_node_weight: int,
+    max_time_in_seconds: float | None,
+) -> dict[int, list[int]]:
+    # Cluster nodes by their weakly connected component
+    edges = {(a, b) for a, b in di_edges | un_edges if edge_weight(a, b) > 0}
+    node_to_wcc = _find_wcc(nodes, edges)
 
-    # Create the text edges between `strong_id`s
-    txt_edge_weights = create_txt_edges(entities_df, similarity)
-    txt_edges = set(txt_edge_weights.keys())
+    # Create initial clustering paths using the weakly connected component as
+    # the root cluster
+    node_to_path: dict[int, list[int]] = dict()
+    for node in nodes:
+        node_to_path[node] = [node_to_wcc[node]]
 
-    # Define some helper functions
-    def get_entity_weight(id: int) -> int:
-        """Return the weight of a single entity."""
-        kind = entities_df.loc[id]["kind"]
-        return 0 if kind == "file" else 1
-
-    def get_strong_weight(strong_id: int) -> int:
-        """Return the weight of a strongly connnected component."""
-        ids = entities_df[entities_df["strong_id"] == strong_id].index
-        return sum(get_entity_weight(id) for id in ids)
-
-    def get_edge_weight(a_strong_id: int, b_strong_id: int) -> int:
-        """Return the weight of an edge between two strongly connected components."""
-        weight = 0
-        key = (a_strong_id, b_strong_id)
-        if key in strong_edges:
-            weight += UNIT_EDGE_WEIGHT
-        if key in txt_edges:
-            txt_weight = txt_edge_weights[key] * UNIT_EDGE_WEIGHT
-            weight += round(txt_weight * TEXT_EDGE_MULTIPLIER)
-        return weight
-
-    def cluster(
-        dep_edges: set[tuple[int, int]],
-        txt_edges: set[tuple[int, int]],
-        active: set[int],
-        cluster_name: str,
-    ) -> dict[int, str]:
-        """Recursively bisect the graph.
-
-        Arguments:
-        dep_edges -- Set of dependency edges between SCCs (indented to be ordered pairs)
-        txt_edges -- Set of textual edges between SCCs (indented to be unordered pairs)
-        active -- Set of currently active SCCs
-        cluster_name -- Name of parent cluster
-
-        Returns:
-        A dict mapping `strong_id`s to a cluster name
-        """
-        def w(strong_id: int) -> int:
-            if strong_id not in active:
-                return 0
-            return get_strong_weight(strong_id)
-
-        # Print info
-        n_active_entities = len([a for a in active if get_strong_weight(a) > 0])
-        logging.info(f"[{cluster_name}] Starting... ({n_active_entities} entities)")
-        logging.debug("======================================")
-        active_nodes = {n: w(n) for n in active}
-        active_dep_edges = {(u, v): get_edge_weight(u, v) for u, v in dep_edges if u in active and v in active}
-        active_txt_edges = {(u, v): get_edge_weight(u, v) for u, v in txt_edges if u in active and v in active}
-        logging.debug(sorted(list(active_nodes.items())))
-        logging.debug(sorted(list(active_dep_edges.items())))
-        logging.debug(sorted(list(active_txt_edges.items())))
-        logging.debug("======================================")
-
-        default_res = {i: cluster_name for i in active}
-
-        if use_threshold:
-            if sum(get_strong_weight(strong_id) for strong_id in active) <= WEIGHT_THRESH:
-                logging.info("Aborted. Weight under threshold.")
-                return default_res
-        else:
-            if n_active_entities < 2:
-                logging.info("Aborted. Nothing left to cluster.")
-                return default_res
-
-        start = time.perf_counter()
-        cut_weight, labels = ilp.partition2(
-            dep_edges, txt_edges, w, get_edge_weight, 2, CUT_EPS, 10
+    # Use the RecursivePartitioner on each weakly connected component
+    wcc_to_nodes: dict[int, set[int]] = defaultdict(set)
+    for node, wcc in node_to_wcc.items():
+        wcc_to_nodes[wcc].add(node)
+    for wcc, component in wcc_to_nodes.items():
+        partitioner = _RecursivePartitioner(
+            {(a, b) for a, b in di_edges if a in component and b in component},
+            {(a, b) for a, b in un_edges if a in component and b in component},
+            node_weight,
+            edge_weight,
+            k,
+            eps,
+            min_node_weight,
+            max_time_in_seconds,
         )
-        if labels is None:
-            logging.error("Aborted. Failed to partition.")
-            return default_res
-        elapsed = time.perf_counter() - start
-        logging.info(f"Bisected with a cut weight of {cut_weight} in {elapsed:0.4f} secs.")
+        partitioner.partition(component)
+        for node, path in partitioner.paths().items():
+            node_to_path[node].extend(path)
 
-        active_A = active & {i for i, l in labels.items() if l == 0}
-        active_B = active & {i for i, l in labels.items() if l == 1}
-        res_A = cluster(dep_edges, txt_edges, active_A, cluster_name + ".A")
-        res_B = cluster(dep_edges, txt_edges, active_B, cluster_name + ".B")
-        return res_A | res_B
+    return node_to_path
 
-    # ...
-    block_names = {}
 
-    for weak_id in range(entities_df["weak_id"].max() + 1):
-        # The strong_ids inside the current weakly connected component (wcc)
-        wcc_nodes = set(entities_df[entities_df["weak_id"] == weak_id]["strong_id"])
-        wcc_dep_edges = {
-            (a, b) for a, b in strong_edges if a in wcc_nodes and b in wcc_nodes
-        }
-        wcc_txt_edges = {
-            (a, b) for a, b in txt_edges if a in wcc_nodes and b in wcc_nodes
-        }
-        block_names |= cluster(
-            wcc_dep_edges, wcc_txt_edges, wcc_nodes, cluster_name=f"R.W{weak_id}"
+def _find_wcc(nodes: set[int], edges: set[tuple[int, int]]) -> dict[int, int]:
+    """
+    Computes the weakly connected components.
+    Returns a dict mapping each node to the root of its WCC.
+    """
+    adj = _to_adj(edges | _transpose(edges))
+    roots: dict[int, int] = {}
+
+    def assign(node: int, root: int) -> None:
+        if node in roots:
+            return
+        roots[node] = root
+        for neighbor in sorted(adj[node]):
+            assign(neighbor, root)
+
+    for i, node in enumerate(sorted(nodes, reverse=True)):
+        assign(node, i)
+
+    # Remap root IDs to be contiguous
+    unique_roots = sorted(set(roots.values()))
+    root_map = {old: new for new, old in enumerate(unique_roots)}
+    for node in roots:
+        roots[node] = root_map[roots[node]]
+
+    return roots
+
+
+def _find_scc(nodes: set[int], edges: set[tuple[int, int]]) -> dict[int, int]:
+    """
+    Computes the strongly connected components using Kosaraju's algorithm.
+    Returns a dict mapping each node to the root of its SCC.
+    """
+    adj = _to_adj(edges)
+    adj_inv = _to_adj(_transpose(edges))
+
+    visited: set[int] = set()
+    order: list[int] = []
+
+    def visit(node: int) -> None:
+        if node in visited:
+            return
+        visited.add(node)
+        for neighbor in sorted(adj[node]):
+            visit(neighbor)
+        order.append(node)
+
+    for node in sorted(nodes):
+        visit(node)
+    order.reverse()
+
+    roots: dict[int, int] = {}
+
+    def assign(node: int, root: int) -> None:
+        if node in roots:
+            return
+        roots[node] = root
+        for neighbor in sorted(adj_inv[node]):
+            assign(neighbor, root)
+
+    for i, node in enumerate(order):
+        assign(node, i)
+
+    # Remap root IDs to be contiguous
+    unique_roots = sorted(set(roots.values()))
+    root_map = {old: new for new, old in enumerate(unique_roots)}
+    for node in roots:
+        roots[node] = root_map[roots[node]]
+
+    return roots
+
+
+def _transpose(edges: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    return {(tgt, src) for src, tgt in edges}
+
+
+def _to_adj(edges: set[tuple[int, int]]) -> defaultdict[int, set[int]]:
+    adj: defaultdict[int, set[int]] = defaultdict(set)
+    for src, tgt in edges:
+        if src == tgt:
+            continue
+        adj[src].add(tgt)
+    return adj
+
+
+class _RecursivePartitioner:
+    def __init__(
+        self,
+        di_edges: set[tuple[int, int]],
+        un_edges: set[tuple[int, int]],
+        node_weight: Callable[[int], int],
+        edge_weight: Callable[[int, int], int],
+        k: int,
+        eps: float,
+        min_node_weight: int,
+        max_time_in_seconds: float | None,
+    ) -> None:
+        self._paths: dict[int, list[int]] = defaultdict(list)
+        self._di_edges = di_edges
+        self._un_edges = un_edges
+        self._node_weight = node_weight
+        self._edge_weight = edge_weight
+        self._k = k
+        self._eps = eps
+        self._min_node_weight = min_node_weight
+        self._max_time_in_seconds = max_time_in_seconds
+
+    def partition(self, nodes: set[int]) -> None:
+        if sum(self._node_weight(x) for x in nodes) < self._min_node_weight:
+            return
+        node_to_labels = _partition(
+            self._di_edges,
+            self._un_edges,
+            lambda x: self._node_weight(x) if x in nodes else 0,
+            self._edge_weight,
+            self._k,
+            self._eps,
+            self._max_time_in_seconds,
+        )
+        if node_to_labels is None:
+            return
+        label_to_nodes: dict[int, set[int]] = defaultdict(set)
+        for node, label in node_to_labels.items():
+            if node not in nodes:
+                continue
+            self._paths[node].append(label)
+            label_to_nodes[label].add(node)
+        for block in label_to_nodes.values():
+            self.partition(block)
+
+    def paths(self) -> dict[int, list[int]]:
+        return self._paths
+
+
+def _partition(
+    di_edges: set[tuple[int, int]],
+    un_edges: set[tuple[int, int]],
+    node_weight: Callable[[int], int],
+    edge_weight: Callable[[int, int], int],
+    k: int,
+    eps: float,
+    max_time_in_seconds: float | None,
+) -> dict[int, int] | None:
+    # Remove any self-edges
+    di_edges = {(a, b) for a, b in di_edges if a != b}
+    un_edges = {(a, b) for a, b in un_edges if a != b}
+
+    # An edge cannot be both directed and undirected
+    un_edges = un_edges - di_edges
+
+    # Create a set for all edges
+    edges = di_edges | un_edges
+
+    # Create a list of node ids found in the edge list
+    nodes = list(sorted({a for a, _ in edges} | {b for _, b in edges}))
+
+    # Create a list of partition ids
+    parts = list(range(k))
+
+    # Calculate the upper bound on partition size
+    bound = ceil((1 + eps) * ceil(sum(node_weight(i) for i in nodes) / k))
+
+    # Setup the constraint programming (CP) model
+    model = cp_model.CpModel()
+
+    # Variable: x_is indicates that node i is assigned to part s
+    x: dict[tuple[int, int], IntVar] = {}
+    for i in nodes:
+        for s in parts:
+            x[i, s] = model.NewBoolVar(f"x[{i},{s}]")
+
+    # Variable: y_st indicates that there is an edge from part s to part t
+    y: dict[tuple[int, int], IntVar] = {}
+    for s in parts:
+        for t in parts:
+            if s != t:
+                y[s, t] = model.NewBoolVar(f"y[{s},{t}]")
+
+    # Variable: z_ij indicates that edge (i,j) is a cut edge
+    z: dict[tuple[int, int], IntVar] = {}
+    for i, j in edges:
+        z[i, j] = model.NewBoolVar(f"z[{i},{j}]")
+
+    # Objective: Minimize the edge cut.
+    model.Minimize(sum(edge_weight(i, j) * z[i, j] for i, j in edges))
+
+    # Constraint: All nodes must belong to exactly one part.
+    for i in nodes:
+        model.AddExactlyOne([x[i, s] for s in parts])
+
+    # Constraint: All parts are be bounded in size.
+    for s in parts:
+        model.AddLinearConstraint(
+            sum(node_weight(i) * x[i, s] for i in nodes), 1, bound
         )
 
-    entities_df["block_name"] = [block_names.get(i) for i in entities_df["strong_id"]]
-    entities_df["block_id"] = entities_df.groupby("block_name").ngroup()
-    return entities_df
+    # Constraint: Mark the cut edges as one if they are in different parts.
+    for i, j in edges:
+        for s in parts:
+            model.Add(x[j, s] - x[i, s] <= z[i, j])
+
+    # Constraint: Mark the adjacency of parts for cut edges (only for directed edges).
+    for i, j in di_edges:
+        for s in parts:
+            for t in parts:
+                if s != t:
+                    model.Add(x[i, s] + x[j, t] - 1 <= y[s, t])
+
+    # Constraint: Force y to be triangular.
+    for s in parts[1:]:
+        for t in parts[:s]:
+            model.Add(y[s, t] == 0)
+
+    # Solve
+    solver = cp_model.CpSolver()
+    if max_time_in_seconds:
+        solver.parameters.max_time_in_seconds = max_time_in_seconds
+    status = solver.Solve(model)
+
+    # Check if successful
+    if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:  # type: ignore
+        return None
+
+    # Extract labels into dictionary
+    labels: dict[int, int] = {}
+    for i in nodes:
+        for s in parts:
+            if solver.BooleanValue(x[i, s]):
+                labels[i] = s
+    return labels

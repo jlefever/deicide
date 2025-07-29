@@ -1,25 +1,27 @@
-from os.path import commonprefix
-from functools import cache, cached_property
 from collections import Counter
-from typing import Iterable, Any
+from dataclasses import dataclass
+from functools import cache, cached_property
+from genericpath import commonprefix
 from itertools import combinations
+from typing import Any, Iterable
 
-import numpy as np
-import pandas as pd
-from numpy.typing import NDArray
-from ordered_set import OrderedSet as oset
 
-from deicide.jdeo import JDeoRow
+@dataclass
+class Entity:
+    id: str
+    parent_id: str | None
+    name: str
+    kind: str
+
+
+@dataclass
+class Dep:
+    src_id: str
+    tgt_id: str
+    kind: str
 
 
 _CLUSTER_PATH_SEP = "$"
-
-
-def single(iterable: Iterable[Any]) -> Any:
-    lst = list(iterable)
-    if len(lst) != 1:
-        raise ValueError(f"non-singleton ({len(lst)} elements)")
-    return lst[0]
 
 
 class ClusterPath:
@@ -45,7 +47,7 @@ class ClusterPath:
     def parent(self) -> "ClusterPath | None":
         if len(self) <= 1:
             return None
-        return self[0:len(self) - 1]
+        return self[0 : len(self) - 1]
 
     @cache
     def ancestors(self) -> list["ClusterPath"]:
@@ -97,33 +99,33 @@ class ClusterPath:
 
 
 class Clustering:
-    _pairs: frozenset[tuple[int, ClusterPath]]
+    _pairs: frozenset[tuple[str, ClusterPath]]
 
-    def __init__(self, pairs: Iterable[tuple[int, ClusterPath]]):
+    def __init__(self, pairs: Iterable[tuple[str, ClusterPath]]) -> None:
         self._pairs = frozenset(pairs)
 
     @property
-    def pairs(self) -> frozenset[tuple[int, ClusterPath]]:
+    def pairs(self) -> frozenset[tuple[str, ClusterPath]]:
         return self._pairs
 
     def union(self, other: "Clustering") -> "Clustering":
         return Clustering(self.pairs | other.pairs)
 
-    def subset(self, entities: set[int]) -> "Clustering":
+    def subset(self, entities: set[str]) -> "Clustering":
         return Clustering((e, c) for e, c in self.pairs if e in entities)
 
     def truncate(self, level: int) -> "Clustering":
         return Clustering((e, c.truncate(level)) for e, c in self.pairs)
 
     def expand(self) -> "Clustering":
-        expanded = set()
+        expanded: set[tuple[str, ClusterPath]] = set()
         for entity, cluster in self.pairs:
             for ancestor in cluster.ancestors_with_self():
                 expanded.add((entity, ancestor))
         return Clustering(expanded)
 
     def contract(self) -> "Clustering":
-        pairs = []
+        pairs: list[tuple[str, ClusterPath]] = []
         for entity in self.entities():
             clusters = sorted(self.clusters_for(entity))  # shorter elements come first
             excluded = {a for a, b in combinations(clusters, 2) if a.is_ancestor_of(b)}
@@ -159,9 +161,9 @@ class Clustering:
     def replace_root(self, root: ClusterPath) -> "Clustering":
         return self.without_root().with_root(root)
 
-    def with_isolated(self, entities: Iterable[int]) -> "Clustering":
+    def with_isolated(self, entities: Iterable[str]) -> "Clustering":
         # This does not consider the rare case where an existing cluster
-        # happens to have the same name as an entity id 
+        # happens to have the same name as an entity id
         isolated = sorted(set(entities) - self.entities())
         pairs = {(e, ClusterPath(str(e))) for e in isolated}
         return Clustering(pairs | self.pairs)
@@ -175,7 +177,7 @@ class Clustering:
         return clustering.without_singletons().with_isolated(entities)
 
     @cache
-    def entities(self) -> set[int]:
+    def entities(self) -> set[str]:
         return {e for e, _ in self.pairs}
 
     @cache
@@ -183,107 +185,44 @@ class Clustering:
         return {c for _, c in self.pairs}
 
     @cache
-    def singleton_clusters(self) -> dict[ClusterPath, int]:
+    def singleton_clusters(self) -> dict[ClusterPath, str]:
         counter = Counter(c for (_, c) in self.pairs)
         singletons = (c for c in self.clusters() if counter[c] == 1)
-        return {c: single(self.entities_for(c)) for c in singletons}
+        return {c: _single(self.entities_for(c)) for c in singletons}
 
     @cache
-    def singleton_entities(self) -> dict[int, ClusterPath]:
+    def singleton_entities(self) -> dict[str, ClusterPath]:
         counter = Counter(e for (e, _) in self.pairs)
         singletons = (e for e in self.entities() if counter[e] == 1)
-        return {c: single(self.clusters_for(c)) for c in singletons}
+        return {c: _single(self.clusters_for(c)) for c in singletons}
 
     @cache
     def num_levels(self) -> int:
         return max(len(c) for c in self.clusters())
 
-    def entities_for(self, cluster: ClusterPath) -> set[int]:
+    def entities_for(self, cluster: ClusterPath) -> set[str]:
         return self.c2e[cluster]
 
-    def clusters_for(self, entity: int) -> set[ClusterPath]:
+    def clusters_for(self, entity: str) -> set[ClusterPath]:
         return self.e2c[entity]
 
     @cached_property
-    def c2e(self) -> dict[ClusterPath, set[int]]:
-        c2e = {c: set() for c in self.clusters()}
+    def c2e(self) -> dict[ClusterPath, set[str]]:
+        c2e: dict[ClusterPath, set[str]] = {c: set() for c in self.clusters()}
         for e, c in self.pairs:
             c2e[c].add(e)
         return c2e
 
     @cached_property
-    def e2c(self) -> dict[int, set[ClusterPath]]:
-        e2c = {e: set() for e in self.entities()}
+    def e2c(self) -> dict[str, set[ClusterPath]]:
+        e2c: dict[str, set[ClusterPath]] = {e: set() for e in self.entities()}
         for e, c in self.pairs:
             e2c[e].add(c)
         return e2c
 
-    @cache
-    def ndarray(self) -> NDArray[np.float64]:
-        clusters = oset(sorted(self.clusters()))
-        entities = oset(sorted(self.entities()))
-        arr = np.zeros((len(clusters), len(entities)))
-        for entity, cluster in self.pairs:
-            row_ix = clusters.index(cluster)
-            col_ix = entities.index(entity)
-            arr[row_ix, col_ix] = 1.0
-        return arr
 
-
-def to_alpha(num: int) -> str:
-    if num < 0:
-        raise ValueError("num must be nonnegative")
-    chars: list[str] = []
-    num = num + 1
-    while num > 0:
-        mod = (num - 1) % 26
-        chars.append(chr(65 + mod))
-        num = (num - mod) // 26
-    return "".join(reversed(chars))
-
-
-def to_my_clustering(entities_df: pd.DataFrame) -> Clustering:
-    triples = ((id, r["block_name"], r["kind"]) for id, r in entities_df.iterrows())
-    return Clustering(
-        (e, ClusterPath(c.split(".")))
-        for e, c, k in triples
-        if k != "file"  # type: ignore
-    )
-
-
-def to_my_clustering_with_files(entities_df: pd.DataFrame) -> Clustering:
-    pairs = ((id, r["block_name"]) for id, r in entities_df.iterrows())
-    return Clustering((e, ClusterPath(c.split("."))) for e, c in pairs)  # type: ignore
-
-
-def to_jdeo_clustering(jdeo_id_map: dict[JDeoRow, int | None]) -> Clustering:
-    return Clustering(
-        (id, ClusterPath(row.cluster.split(".")))
-        for row, id in jdeo_id_map.items()
-        if id is not None
-    )
-
-
-def to_commit_clustering(touches_df: pd.DataFrame) -> Clustering:
-    return Clustering(
-        (r["entity_id"], ClusterPath([r["sha1"]])) for _, r in touches_df.iterrows()
-    )
-
-
-def to_author_clustering(touches_df: pd.DataFrame) -> Clustering:
-    return Clustering(
-        (r["entity_id"], ClusterPath([r["author_email"]]))
-        for _, r in touches_df.iterrows()
-    )
-
-
-def to_client_clustering(
-    clients_df: pd.DataFrame, client_deps_df: pd.DataFrame
-) -> Clustering:
-    memberships = set()
-    for _, row in client_deps_df.iterrows():
-        src_id = int(row["src_id"])
-        tgt_id = int(row["tgt_id"])
-        client = str(clients_df.loc[src_id]["name"])
-        memberships.add((tgt_id, ClusterPath([client])))
-    return Clustering(memberships)
+def _single(iterable: Iterable[Any]) -> Any:
+    lst = list(iterable)
+    if len(lst) != 1:
+        raise ValueError(f"non-singleton ({len(lst)} elements)")
+    return lst[0]
