@@ -106,7 +106,7 @@ def main(
     # Write dv8 clustering output
     dv8_output = output.with_suffix(".dv8.json")
     with open(dv8_output, "w") as f:
-        json.dump(dv8_clustering.to_dict(), f)
+        json.dump(dv8_clustering.to_dict(), f, indent=2)
 
 
 if __name__ == "__main__":
