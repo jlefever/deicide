@@ -6,6 +6,7 @@ import click
 
 from deicide.db import DbDriver
 from deicide.deicide import deicide
+from deicide.dv8 import create_dv8_clustering
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +90,23 @@ def main(
     client_deps = db_driver.load_client_deps(parent_id)
 
     # Run algorithm
-    res = deicide(children, clients, internal_deps, client_deps)
+    clustering = deicide(children, clients, internal_deps, client_deps)
+
+    # create hex_id to entity mapping (don't take clients into account for now)
+    id_to_entity = {entity.id: entity for entity in children}
+
+    # Generate dv8 clustering output
+    output_name= output.stem
+    dv8_clustering = create_dv8_clustering(clustering, id_to_entity, output_name)
 
     # Write output
     with open(output, "w") as f:
-        json.dump(list(res), f)
+        json.dump(list(clustering), f)
+
+    # Write dv8 clustering output
+    dv8_output = output.with_suffix(".dv8.json")
+    with open(dv8_output, "w") as f:
+        json.dump(dv8_clustering.to_dict(), f)
 
 
 if __name__ == "__main__":
