@@ -43,6 +43,10 @@ class DV8Clustering:
 def create_dv8_clustering(clustering: list[tuple[str, list[int]]], id_to_entity: dict[str, Entity], output_name: str) -> DV8Clustering:
     """Convert deicide clustering to DV8-compatible format"""
 
+    # Create unique names mapping
+    entities = list(id_to_entity.values())
+    unique_names = create_unique_entity_names(entities)
+
     root_structure: list[DV8ClusteringNode] = []
 
     def find_or_create_child(
@@ -76,10 +80,10 @@ def create_dv8_clustering(clustering: list[tuple[str, list[int]]], id_to_entity:
 
     # Process each entry in deicide clustering output
     for hex_id, cluster_path in clustering:
-        entity_name = id_to_entity[hex_id].name
+        unique_entity_name = unique_names[hex_id]
 
         if not cluster_path:
-            print(f"Warning: Empty cluster path for entity {entity_name} ({hex_id}), skipping.")
+            print(f"Warning: Empty cluster path for entity {unique_entity_name} ({hex_id}), skipping.")
             continue
         
         # Start at root
@@ -96,7 +100,7 @@ def create_dv8_clustering(clustering: list[tuple[str, list[int]]], id_to_entity:
         # Add item node at the end of the path
         if current_node is not None:
             entity_item = DV8ClusteringNode(
-                name=entity_name,
+                name=unique_entity_name,
                 type="item",
             )
             # Append node to existing list
@@ -108,3 +112,23 @@ def create_dv8_clustering(clustering: list[tuple[str, list[int]]], id_to_entity:
         structure=root_structure
     )
 
+def create_unique_entity_names(entities: list[Entity]) -> dict[str, str]:
+    """Create unique names for entities, handling duplicates with (1), (2), etc."""
+    name_counts: dict[str, int] = {}
+    entity_to_unique_name: dict[str, str] = {}
+
+    for entity in entities:
+        base_name = entity.name
+
+        if base_name not in name_counts:
+            # First occurrence
+            name_counts[base_name] = 1
+            entity_to_unique_name[entity.id] = base_name
+        else:
+            # Duplicate
+            count = name_counts[base_name]
+            unique_name = f"{base_name} ({count})"
+            name_counts[base_name] += 1
+            entity_to_unique_name[entity.id] = unique_name
+    
+    return entity_to_unique_name
