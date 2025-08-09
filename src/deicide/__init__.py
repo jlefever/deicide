@@ -6,7 +6,8 @@ import click
 
 from deicide.db import DbDriver
 from deicide.deicide import deicide
-from deicide.dv8 import create_dv8_clustering
+from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
+from deicide.core import Entity
 
 logger = logging.getLogger(__name__)
 
@@ -92,22 +93,36 @@ def main(
     # Run algorithm
     clustering = deicide(children, clients, internal_deps, client_deps)
 
-    # create hex_id to entity mapping (don't take clients into account for now)
+    # create hex_id to entity mapping (file entities + clients)
     id_to_entity = {entity.id: entity for entity in children}
 
+    # Add clients to the mapping with modified names
+    for client in clients:
+        modified_client = Entity(
+            id=client.id,
+            name=f"(Client) {client.name}",
+            parent_id=client.parent_id,
+            kind=client.kind
+        )
+        id_to_entity[modified_client.id] = modified_client
     # Generate dv8 clustering output
     output_name= output.stem
     dv8_clustering = create_dv8_clustering(clustering, id_to_entity, output_name)
+    dsm_dependencies = create_dv8_dependency(id_to_entity, internal_deps, client_deps, output_name)
 
     # Write output
     with open(output, "w") as f:
         json.dump(list(clustering), f)
 
     # Write dv8 clustering output
-    dv8_output = output.with_suffix(".dv8.json")
+    dv8_output = output.with_suffix(".dv8-clustering.json")
     with open(dv8_output, "w") as f:
         json.dump(dv8_clustering.to_dict(), f, indent=2)
 
+    # Write dsm dependency output
+    dsm_output = output.with_suffix(".dv8-dependency.json")
+    with open(dsm_output, "w") as f:
+        json.dump(dsm_dependencies, f, indent=2)
 
 if __name__ == "__main__":
     main()
