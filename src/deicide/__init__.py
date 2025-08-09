@@ -32,11 +32,18 @@ logger = logging.getLogger(__name__)
     type=str,
     help="Commit hash (required if DB has multiple versions).",
 )
+@click.option(
+    "--dv8-result",
+    is_flag=True,
+    default=False,
+    help="Generate DV8 clustering output (.dv8-clustering.json) and DV8 dependency output"
+)
 def main(
     input: Path,
     output: Path,
     filename: str,
     commit_hash: str | None,
+    dv8_result: bool
 ):
     # Set up logging
     logging.basicConfig(
@@ -105,24 +112,24 @@ def main(
             kind=client.kind
         )
         id_to_entity[modified_client.id] = modified_client
-    # Generate dv8 clustering output
-    output_name= output.stem
-    dv8_clustering = create_dv8_clustering(clustering, id_to_entity, output_name)
-    dsm_dependencies = create_dv8_dependency(id_to_entity, internal_deps, client_deps, output_name)
 
     # Write output
     with open(output, "w") as f:
         json.dump(list(clustering), f)
 
-    # Write dv8 clustering output
-    dv8_output = output.with_suffix(".dv8-clustering.json")
-    with open(dv8_output, "w") as f:
-        json.dump(dv8_clustering.to_dict(), f, indent=2)
+    output_name= output.stem
 
-    # Write dsm dependency output
-    dsm_output = output.with_suffix(".dv8-dependency.json")
-    with open(dsm_output, "w") as f:
-        json.dump(dsm_dependencies, f, indent=2)
+    # Generate optional output based on flags
+    if dv8_result:
+        dv8_clustering = create_dv8_clustering(clustering, id_to_entity, output_name)
+        dv8_output = output.with_suffix(".dv8-clustering.json")
+        with open(dv8_output, "w") as f:
+            json.dump(dv8_clustering.to_dict(), f, indent=2)
+
+        dsm_dependencies = create_dv8_dependency(id_to_entity, internal_deps, client_deps, output_name)
+        dsm_output = output.with_suffix(".dv8-dependency.json")
+        with open(dsm_output, "w") as f:
+            json.dump(dsm_dependencies, f, indent=2)
 
 if __name__ == "__main__":
     main()
