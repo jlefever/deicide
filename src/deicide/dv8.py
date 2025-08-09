@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
-from deicide.core import Entity
+from deicide.core import Entity, Dep
 
 @dataclass
 class DV8ClusteringNode:
@@ -105,7 +105,16 @@ def create_dv8_clustering(clustering: list[tuple[str, list[int]]], id_to_entity:
             )
             # Append node to existing list
             current_node.nested.append(entity_item)
-        
+    
+    # Add client entities as separate modules at root level for visualization in DV8
+    for entity in id_to_entity.values():
+        if entity.name.startswith("(Client)"):
+            client_item = DV8ClusteringNode(
+                name=entity.name,
+                type="item",
+            )
+            root_structure.append(client_item)
+            
     return DV8Clustering(
         schema_version="1.0",
         name=output_name,
@@ -132,3 +141,74 @@ def create_unique_entity_names(entities: list[Entity]) -> dict[str, str]:
             entity_to_unique_name[entity.id] = unique_name
     
     return entity_to_unique_name
+
+def create_dv8_dependency(
+    id_to_entity: dict[str, Entity],
+    internal_deps: list[Dep],
+    client_deps: list[Dep],
+    output_name: str
+) -> dict:
+    """Create DV8-compatible dependency (DSM) data"""
+
+    # Create ordered variables array (lexicographically)
+    entities = list(id_to_entity.values())
+    entities.sort(key=lambda e: e.name)
+    variables = [entity.name for entity in entities]
+    
+    # Create entity name to index mapping
+    entity_id_to_index = {entity.id: idx for idx, entity in enumerate(entities)}
+    
+    # Aggregate dependencies by type
+    dep_matrix = aggregate_dependencies(internal_deps + client_deps, entity_id_to_index)
+
+    # Convert to cells format
+    cells = create_cells_from_matrix(dep_matrix)
+    
+    return {
+        "@schemaVersion": "1.0",
+        "name": output_name,
+        "variables": variables,
+        "cells": cells
+    }
+
+def aggregate_dependencies(
+    all_deps: list[Dep],
+    entity_id_to_index: dict[str, int]
+) -> dict[tuple[int, int], dict[str, float]]:
+    """Aggregate dependencies by source, destination, and type"""
+
+    dep_matrix: dict[tuple[int, int], dict[str, float]] = {}
+
+    for dep in all_deps:
+        # Skip if either entity not in our index
+        if dep.src_id not in entity_id_to_index or dep.tgt_id not in entity_id_to_index:
+            continue
+            
+        src_idx = entity_id_to_index[dep.src_id]
+        tgt_idx = entity_id_to_index[dep.tgt_id]
+        key = (src_idx, tgt_idx)
+
+        if key not in dep_matrix:
+            dep_matrix[key] = {}
+        
+        if dep.kind not in dep_matrix[key]:
+            dep_matrix[key][dep.kind] = 0.0
+        
+        # Aggregate count
+        dep_matrix[key][dep.kind] += 1.0
+
+    return dep_matrix
+
+def create_cells_from_matrix(dep_matrix) -> list[dict]:
+    """Convert dependency matrix to cells format"""
+    
+    cells = []
+    for (src_idx, tgt_idx), type_counts in dep_matrix.items():
+        cell = {
+            "src": src_idx,
+            "dest": tgt_idx,
+            "values": dict(type_counts)
+        }
+        cells.append(cell)
+    
+    return cells
