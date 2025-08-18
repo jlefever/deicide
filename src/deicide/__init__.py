@@ -1,4 +1,3 @@
-import json
 import logging
 from pathlib import Path
 
@@ -6,6 +5,7 @@ import click
 
 from deicide.db import DbDriver
 from deicide.deicide import deicide
+from deicide.semantic import KielaClarkSimilarity
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
     "--output",
     required=True,
     type=click.Path(exists=False, dir_okay=False, path_type=Path),
-    help="Path to output JSON file. Must not exist.",
+    help="Path to output text file. Must not exist.",
 )
 @click.option("--filename", required=True, type=str, help="Filename in the database.")
 @click.option(
@@ -35,7 +35,7 @@ def main(
     output: Path,
     filename: str,
     commit_hash: str | None,
-):
+) -> None:
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,
@@ -88,12 +88,19 @@ def main(
     internal_deps = db_driver.load_internal_deps(parent_id)
     client_deps = db_driver.load_client_deps(parent_id)
 
+    # Create semantic similarity
+    semantic = KielaClarkSimilarity()
+    semantic.fit({e.id: e.name for e in children})
+
     # Run algorithm
-    res = deicide(children, clients, internal_deps, client_deps)
+    res = deicide(children, clients, internal_deps + client_deps, semantic)
 
     # Write output
+    id_to_entity = {e.id: e for e in children + clients}
     with open(output, "w") as f:
-        json.dump(list(res), f)
+        for id, cluster in res:
+            name = id_to_entity[id].name
+            f.write(f"{name} : {cluster}\n")
 
 
 if __name__ == "__main__":
