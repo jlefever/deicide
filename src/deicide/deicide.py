@@ -2,7 +2,7 @@ import itertools as it
 from collections import defaultdict
 from math import ceil
 
-from ortools.sat.python.cp_model import CpModel, CpSolver, IntVar
+from ortools.sat.python import cp_model
 
 from deicide.core import Dep, Entity
 from deicide.semantic import SemanticSimilarity
@@ -55,7 +55,7 @@ def deicide(
 
     # Return clustering
     memberships: list[tuple[str, list[int]]] = []
-    for ix, entity in enumerate(targets):
+    for ix, entity in enumerate(entities):
         memberships.append((entity.id, res[ix]))
     return memberships
 
@@ -324,23 +324,23 @@ def _partition_dag_component(
     bound = ceil((1 + eps) * ceil(sum(node_weights[i] for i in nodes) / k))
 
     # Setup the constraint programming (CP) model
-    model = CpModel()
+    model = cp_model.CpModel()
 
     # Variable: x_is indicates that node i is assigned to part s
-    x: dict[tuple[int, int], IntVar] = dict()
+    x: dict[tuple[int, int], cp_model.IntVar] = dict()
     for i in nodes:
         for s in parts:
             x[i, s] = model.NewBoolVar(f"x[{i},{s}]")
 
     # Variable: y_st indicates that there is an edge from part s to part t
-    y: dict[tuple[int, int], IntVar] = dict()
+    y: dict[tuple[int, int], cp_model.IntVar] = dict()
     for s in parts:
         for t in parts:
             if s != t:
                 y[s, t] = model.NewBoolVar(f"y[{s},{t}]")
 
     # Variable: z_ij indicates that edge (i,j) is a cut edge
-    z: dict[tuple[int, int], IntVar] = dict()
+    z: dict[tuple[int, int], cp_model.IntVar] = dict()
     for i, j in edges:
         z[i, j] = model.NewBoolVar(f"z[{i},{j}]")
 
@@ -379,7 +379,7 @@ def _partition_dag_component(
             model.Add(y[s, t] == 0)
 
     # Solve
-    solver = CpSolver()
+    solver = cp_model.CpSolver()
     if max_time_in_seconds:
         solver.parameters.max_time_in_seconds = max_time_in_seconds
     status = solver.Solve(model)
