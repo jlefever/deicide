@@ -1,4 +1,3 @@
-import json
 import logging
 from pathlib import Path
 
@@ -8,6 +7,7 @@ from deicide.db import DbDriver
 from deicide.deicide import deicide
 from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
 from deicide.core import Entity
+from deicide.semantic import KielaClarkSimilarity
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
     "--output",
     required=True,
     type=click.Path(exists=False, dir_okay=False, path_type=Path),
-    help="Path to output JSON file. Must not exist.",
+    help="Path to output text file. Must not exist.",
 )
 @click.option("--filename", required=True, type=str, help="Filename in the database.")
 @click.option(
@@ -44,7 +44,7 @@ def main(
     filename: str,
     commit_hash: str | None,
     dv8_result: bool
-):
+) -> None:
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,
@@ -97,10 +97,14 @@ def main(
     internal_deps = db_driver.load_internal_deps(parent_id)
     client_deps = db_driver.load_client_deps(parent_id)
 
-    # Run algorithm
-    clustering = deicide(children, clients, internal_deps, client_deps)
+    # Create semantic similarity
+    semantic = KielaClarkSimilarity()
+    semantic.fit({e.id: e.name for e in children})
 
-    # create hex_id to entity mapping (file entities + clients)
+    # Run algorithm
+    clustering = deicide(children, clients, internal_deps + client_deps, semantic)
+
+    # Create hex_id to entity mapping (file entities + clients)
     id_to_entity = {entity.id: entity for entity in children}
 
     # Add clients to the mapping with modified names
@@ -114,10 +118,13 @@ def main(
         id_to_entity[modified_client.id] = modified_client
 
     # Write output
+    id_to_entity = {e.id: e for e in children + clients}
     with open(output, "w") as f:
-        json.dump(list(clustering), f)
+        for id, cluster in res:
+            name = id_to_entity[id].name
+            f.write(f"{name} : {cluster}\n")
 
-    output_name= output.stem
+    output_name = output.stem
 
     # Generate optional output based on flags
     if dv8_result:
