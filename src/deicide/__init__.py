@@ -5,6 +5,8 @@ import click
 
 from deicide.db import DbDriver
 from deicide.deicide import deicide
+from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
+from deicide.core import Entity
 from deicide.semantic import KielaClarkSimilarity
 
 logger = logging.getLogger(__name__)
@@ -30,11 +32,18 @@ logger = logging.getLogger(__name__)
     type=str,
     help="Commit hash (required if DB has multiple versions).",
 )
+@click.option(
+    "--dv8-result",
+    is_flag=True,
+    default=False,
+    help="Generate DV8 clustering output (.dv8-clustering.json) and DV8 dependency output"
+)
 def main(
     input: Path,
     output: Path,
     filename: str,
     commit_hash: str | None,
+    dv8_result: bool
 ) -> None:
     # Set up logging
     logging.basicConfig(
@@ -93,7 +102,20 @@ def main(
     semantic.fit({e.id: e.name for e in children})
 
     # Run algorithm
-    res = deicide(children, clients, internal_deps + client_deps, semantic)
+    clustering = deicide(children, clients, internal_deps + client_deps, semantic)
+
+    # Create hex_id to entity mapping (file entities + clients)
+    id_to_entity = {entity.id: entity for entity in children}
+
+    # Add clients to the mapping with modified names
+    for client in clients:
+        modified_client = Entity(
+            id=client.id,
+            name=f"(Client) {client.name}",
+            parent_id=client.parent_id,
+            kind=client.kind
+        )
+        id_to_entity[modified_client.id] = modified_client
 
     # Write output
     id_to_entity = {e.id: e for e in children + clients}
@@ -102,6 +124,19 @@ def main(
             name = id_to_entity[id].name
             f.write(f"{name} : {cluster}\n")
 
+    output_name = output.stem
+
+    # Generate optional output based on flags
+    if dv8_result:
+        dv8_clustering = create_dv8_clustering(clustering, id_to_entity, output_name)
+        dv8_output = output.with_suffix(".dv8-clustering.json")
+        with open(dv8_output, "w") as f:
+            json.dump(dv8_clustering.to_dict(), f, indent=2)
+
+        dsm_dependencies = create_dv8_dependency(id_to_entity, internal_deps, client_deps, output_name)
+        dsm_output = output.with_suffix(".dv8-dependency.json")
+        with open(dsm_output, "w") as f:
+            json.dump(dsm_dependencies, f, indent=2)
 
 if __name__ == "__main__":
     main()
