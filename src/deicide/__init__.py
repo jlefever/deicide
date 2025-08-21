@@ -9,6 +9,7 @@ from deicide.db import DbDriver
 from deicide.deicide import deicide
 from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
 from deicide.semantic import KielaClarkSimilarity
+from deicide.corpus import extract_entity_content
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +97,12 @@ def main(
     internal_deps = db_driver.load_internal_deps(parent_id)
     client_deps = db_driver.load_client_deps(parent_id)
 
+    # Load content of the whole file
+    file_content = db_driver.load_file_content(parent_id)
+
     # Create semantic similarity
     semantic = KielaClarkSimilarity()
-    semantic.fit({e.id: e.name for e in children})
+    semantic.fit({e.id: extract_entity_content(file_content, e) for e in children})
 
     # Run algorithm
     clustering = deicide(children, clients, internal_deps + client_deps, semantic)
@@ -113,6 +117,10 @@ def main(
             name=f"(Client) {client.name}",
             parent_id=client.parent_id,
             kind=client.kind,
+            start=client.start,
+            end=client.end,
+            cmt_start=client.cmt_start,
+            cmt_end=client.cmt_end,
         )
         id_to_entity[modified_client.id] = modified_client
 
