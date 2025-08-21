@@ -12,6 +12,10 @@ class Entity:
     parent_id: str | None
     name: str
     kind: str
+    start: int
+    end: int
+    cmt_start: int
+    cmt_end: int
 
 
 @dataclass
