@@ -47,7 +47,7 @@ class DbDriver:
         Returns the direct children of the entity identified by the given ID.
         """
         sql = """
-            SELECT id, parent_id, name, kind
+            SELECT id, parent_id, name, kind, start_byte, end_byte, comment_start_byte, comment_end_byte
             FROM entities WHERE parent_id = ?
             ORDER BY start_byte
         """
@@ -92,7 +92,11 @@ class DbDriver:
                 RE.id,
                 RE.parent_id,
                 RE.name,
-                RE.kind
+                RE.kind,
+                RE.start_byte,
+                RE.end_byte,
+                RE.comment_start_byte,
+                RE.comment_end_byte
             FROM deps D
             JOIN temp.roots SR ON SR.entity_id = D.src
             JOIN entities RE ON RE.id = SR.root_id
@@ -140,6 +144,20 @@ class DbDriver:
         self._cursor.execute(sql, {"pid": pid, "cid": cid})
         return [self._make_dep(*r) for r in self._cursor.fetchall()]
 
+    def load_file_content(self, parent_id: str) -> str:
+        """
+        Returns the code content of the file with the given id.
+        """
+        sql = """
+            SELECT contents.content
+            FROM entities
+            JOIN contents ON entities.content_id = contents.id
+            WHERE entities.id = ?
+        """
+        self._cursor.execute(sql, (bytes.fromhex(parent_id),))
+        row = self._cursor.fetchone()
+        return row[0] if row else ""
+    
     def _ensure_roots_table(self) -> None:
         """
         Ensures that the temporary 'roots' table exists, which maps each entity
@@ -169,7 +187,7 @@ class DbDriver:
         """)
 
     def _make_entity(
-        self, id: bytes, parent_id: bytes | None, name: str, kind: str
+        self, id: bytes, parent_id: bytes | None, name: str, kind: str, start_byte: int, end_byte: int, comment_start_byte: int | None, comment_end_byte: int | None
     ) -> Entity:
         """
         Constructs an Entity object from database row fields.
@@ -179,6 +197,10 @@ class DbDriver:
             parent_id=parent_id.hex() if parent_id is not None else None,
             name=name,
             kind=kind,
+            start=start_byte,
+            end=end_byte,
+            cmt_start=comment_start_byte,
+            cmt_end=comment_end_byte
         )
 
     def _make_dep(self, src_id: bytes, tgt_id: bytes, kind: str) -> Dep:
