@@ -16,3 +16,7 @@ def extract_entity_content(file_content: bytes, entity: Entity) -> str:
         start_byte = entity.start_byte
         end_byte = entity.end_byte
     return file_content[start_byte:end_byte].decode()
+
+def filter_code_members(entities: list[Entity]) -> list[Entity]:
+    """Return only entities of kind 'Method', 'Constructor', or 'Field'."""
+    return [e for e in entities if e.kind in {"Method", "Constructor", "Field"}]
