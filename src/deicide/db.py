@@ -42,12 +42,26 @@ class DbDriver:
         sql = "SELECT name, id FROM entities WHERE parent_id IS NULL"
         return {r[0]: r[1].hex() for r in self._cursor.execute(sql)}
 
+    def load_all_entities(self) -> list[Entity]:
+        """
+        Returns all entities in the database
+        """
+        sql = """
+            SELECT id, parent_id, name, kind, start_byte, end_byte,
+            comment_start_byte, comment_end_byte, content_id
+            FROM entities
+        """
+        self._cursor.execute(sql)
+        rows = self._cursor.fetchall()
+        return [self._make_entity(*row) for row in rows]
+
     def load_children(self, entity_id: str) -> list[Entity]:
         """
         Returns the direct children of the entity identified by the given ID.
         """
         sql = """
-            SELECT id, parent_id, name, kind, start_byte, end_byte, comment_start_byte, comment_end_byte
+            SELECT id, parent_id, name, kind, start_byte, end_byte,
+            comment_start_byte, comment_end_byte
             FROM entities WHERE parent_id = ?
             ORDER BY start_byte
         """
