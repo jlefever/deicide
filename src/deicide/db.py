@@ -61,7 +61,7 @@ class DbDriver:
         """
         sql = """
             SELECT id, parent_id, name, kind, start_byte, end_byte,
-            comment_start_byte, comment_end_byte
+            comment_start_byte, comment_end_byte, content_id
             FROM entities WHERE parent_id = ?
             ORDER BY start_byte
         """
@@ -169,7 +169,7 @@ class DbDriver:
         """
         self._cursor.execute(sql)
         rows = self._cursor.fetchall()
-        return {r[0]: r[1].encode() for r in rows}
+        return {r[0].hex(): r[1].encode() for r in rows}
 
     def load_file_content(self, parent_id: str) -> bytes | None:
         """
