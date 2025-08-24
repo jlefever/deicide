@@ -12,10 +12,11 @@ class Entity:
     parent_id: str | None
     name: str
     kind: str
-    start: int
-    end: int
-    cmt_start: int
-    cmt_end: int
+    start_byte: int
+    end_byte: int
+    comment_start_byte: int
+    comment_end_byte: int
+    content_id: str
 
 
 @dataclass
