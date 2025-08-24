@@ -155,7 +155,7 @@ class DbDriver:
         """
         self._cursor.execute(sql)
         rows = self._cursor.fetchall()
-        return {r[0]: r[1] for r in rows}
+        return {r[0]: r[1].encode() for r in rows}
 
     def load_file_content(self, parent_id: str) -> bytes | None:
         """
