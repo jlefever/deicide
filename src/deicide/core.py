@@ -14,8 +14,8 @@ class Entity:
     kind: str
     start_byte: int
     end_byte: int
-    comment_start_byte: int
-    comment_end_byte: int
+    comment_start_byte: int | None
+    comment_end_byte: int | None
     content_id: str
 
 
