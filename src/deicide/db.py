@@ -145,6 +145,18 @@ class DbDriver:
         self._cursor.execute(sql, {"pid": pid, "cid": cid})
         return [self._make_dep(*r) for r in self._cursor.fetchall()]
 
+    def load_all_contents(self) -> dict[str, bytes]:
+        """
+        Returns the code content of all the files in the database
+        """
+        sql = """
+            SELECT contents.id, contents.content
+            FROM contents
+        """
+        self._cursor.execute(sql)
+        rows = self._cursor.fetchall()
+        return {r[0]: r[1] for r in rows}
+
     def load_file_content(self, parent_id: str) -> bytes | None:
         """
         Returns the code content of the file with the given id.
