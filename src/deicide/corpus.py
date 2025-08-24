@@ -1,16 +1,16 @@
 from deicide.core import Entity
 
+USE_DOC_COMMENTS = True
+
+
 def extract_entity_content(file_content: bytes, entity: Entity) -> str:
     """
     Extracts the content of the given entity from the file content.
     """
-    # take the subarray from entity.start to entity.end
-    full_content = file_content[entity.start:entity.end]
-
-    # remove the doc comment from full_content
-    if entity.cmt_start is not None and entity.cmt_end is not None:
-        content_without_doc_comment = full_content[:entity.cmt_start - entity.start] + full_content[entity.cmt_end - entity.start + 1:]
+    if USE_DOC_COMMENTS:
+        start_byte = min(entity.start, entity.cmt_start)
+        end_byte = max(entity.end, entity.cmt_end)
     else:
-        content_without_doc_comment = full_content
-
-    return content_without_doc_comment
+        start_byte = entity.start
+        end_byte = entity.end
+    return file_content[start_byte:end_byte].decode()
