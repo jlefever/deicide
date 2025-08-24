@@ -102,7 +102,11 @@ def main(
 
     # Create semantic similarity
     semantic = KielaClarkSimilarity()
-    semantic.fit({e.id: extract_entity_content(file_content, e) for e in children})
+    if (file_content):
+        semantic.fit({e.id: extract_entity_content(file_content, e) for e in children})
+    else:
+        logger.error("Failed to extract file content.")
+        quit(-1)
 
     # Run algorithm
     clustering = deicide(children, clients, internal_deps + client_deps, semantic)
@@ -117,10 +121,11 @@ def main(
             name=f"(Client) {client.name}",
             parent_id=client.parent_id,
             kind=client.kind,
-            start=client.start,
-            end=client.end,
-            cmt_start=client.cmt_start,
-            cmt_end=client.cmt_end,
+            start_byte=client.start_byte,
+            end_byte=client.end_byte,
+            comment_start_byte=client.comment_start_byte,
+            comment_end_byte=client.comment_end_byte,
+            content_id=client.content_id,
         )
         id_to_entity[modified_client.id] = modified_client
 
