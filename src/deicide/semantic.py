@@ -35,8 +35,9 @@ class KielaClarkSimilarity(SemanticSimilarity):
 
 
 class LSISimilarity(SemanticSimilarity):
-    def __init__(self) -> None:
+    def __init__(self, cutoff_method: str) -> None:
         self._corpus: dict[str, str] = dict()
+        self._cutoff_method = cutoff_method
 
     def fit(self, corpus: dict[str, str]) -> None:
         self._corpus = corpus
@@ -45,6 +46,7 @@ class LSISimilarity(SemanticSimilarity):
     def sim(self, a_id: str, b_id: str) -> float:
         # a_doc, b_doc = self._corpus[a_id], self._corpus[b_id]
         score: float = self._lsi.sim(a_id, b_id)
-        if score < LSI_MIN_SIM:
-            return 0.0
+        if (self._cutoff_method == "threshold"):
+            if score < LSI_MIN_SIM:
+                return 0.0
         return score
