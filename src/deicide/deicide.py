@@ -1,4 +1,5 @@
 import itertools as it
+import numpy as np
 from collections import defaultdict
 from math import ceil
 
@@ -6,6 +7,7 @@ from ortools.sat.python import cp_model
 
 from deicide.core import Dep, Entity
 from deicide.semantic import SemanticSimilarity
+from deicide.mututal_knn import getMututalKnnGraph
 
 TEXT_EDGE_MULTIPLIER = 1
 
@@ -15,6 +17,7 @@ def deicide(
     clients: list[Entity],
     deps: list[Dep],
     semantic: SemanticSimilarity,
+    cutoff_method: str,
 ) -> list[tuple[str, list[int]]]:
     # Set up graph
     entities = targets + clients
@@ -26,12 +29,26 @@ def deicide(
 
     # Create edges from name similarity
     un_weights: dict[tuple[int, int], float] = dict()
-    for a_entity, b_entity in it.combinations(targets, 2):
-        score = semantic.sim(a_entity.id, b_entity.id)
-        if score <= 0:
-            continue
-        a_ix, b_ix = id_to_ix[a_entity.id], id_to_ix[b_entity.id]
-        un_weights[a_ix, b_ix] = score
+    if cutoff_method == "threshold":
+        for a_entity, b_entity in it.combinations(targets, 2):
+            score = semantic.sim(a_entity.id, b_entity.id)
+            if score <= 0:
+                continue
+            a_ix, b_ix = id_to_ix[a_entity.id], id_to_ix[b_entity.id]
+            un_weights[a_ix, b_ix] = score
+    elif cutoff_method == "top_k":
+        base_graph: dict[tuple[int, int], float] = dict()
+        for a_entity, b_entity in it.combinations(targets, 2):
+            score = semantic.sim(a_entity.id, b_entity.id)
+            a_ix, b_ix = id_to_ix[a_entity.id], id_to_ix[b_entity.id]
+            base_graph[(a_ix, b_ix)] = score
+        k: int = int(np.log(len(targets)))
+        mututal_knn_graph: dict[tuple[int, int], float] = getMututalKnnGraph(
+            base_graph, k
+        )
+        for (a_ix, b_ix), score in mututal_knn_graph.items():
+            un_weights[a_ix, b_ix] = score
+
     un_edges = set(un_weights.keys())
 
     # Create node weights
@@ -56,7 +73,8 @@ def deicide(
     # Return clustering
     memberships: list[tuple[str, list[int]]] = []
     for ix, entity in enumerate(entities):
-        memberships.append((entity.id, res[ix]))
+        if entity.parent_id is not None:
+            memberships.append((entity.id, res[ix]))
     return memberships
 
 
