@@ -119,9 +119,9 @@ def main(
     # Create semantic similarity model
     if semantic_model == "kiela_clark":
         semantic = KielaClarkSimilarity()
-        training_contents = {**file_content, **dict(additional_contents)}
     else:
         semantic = LSISimilarity()
+        training_contents = {**file_content, **dict(additional_contents)}
     corpus: dict[str, str] = collect_corpus(all_entities, training_contents)
     semantic.fit(corpus)
 
