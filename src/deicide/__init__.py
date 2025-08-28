@@ -1,5 +1,6 @@
 import json
 import logging
+# import itertools as it
 from pathlib import Path
 
 import click
@@ -8,8 +9,8 @@ from deicide.core import Entity
 from deicide.db import DbDriver
 from deicide.deicide import deicide
 from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
-from deicide.semantic import KielaClarkSimilarity
-from deicide.corpus import extract_entity_content
+from deicide.semantic import KielaClarkSimilarity, LSISimilarity
+from deicide.corpus import collect_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,14 @@ logger = logging.getLogger(__name__)
     help="Generate DV8 clustering output (.dv8-clustering.json) and DV8 dependency \
         output",
 )
+@click.option(
+    "--semantic-model",
+    type=click.Choice(["kiela_clark", "lsi"], case_sensitive=False),
+    default="lsi",
+    help="Semantic similarity model to use.",
+)
 def main(
-    input: Path, output: Path, filename: str, commit_hash: str | None, dv8_result: bool
+    input: Path, output: Path, filename: str, commit_hash: str | None, dv8_result: bool, semantic_model: str
 ) -> None:
     # Set up logging
     logging.basicConfig(
@@ -97,16 +104,26 @@ def main(
     internal_deps = db_driver.load_internal_deps(parent_id)
     client_deps = db_driver.load_client_deps(parent_id)
 
-    # Load content of the whole file
+    # Load all contents and entities
     file_content = db_driver.load_file_content(parent_id)
-
-    # Create semantic similarity
-    semantic = KielaClarkSimilarity()
-    if (file_content):
-        semantic.fit({e.id: extract_entity_content(file_content, e) for e in children})
+    all_contents = db_driver.load_all_contents()
+    all_entities = db_driver.load_all_entities()
+    # Take 500 contents from all_contents that are not file_content and merge that with file_content
+    file_content_key = next(iter(file_content.keys()))
+    num_extra_contents = min(500, len(all_contents) - 1)
+    additional_contents = [
+        (content_key, content_value) for content_key, content_value in all_contents.items()
+        if content_key != file_content_key
+    ][:num_extra_contents]
+    training_contents = {**file_content}
+    # Create semantic similarity model
+    if semantic_model == "kiela_clark":
+        semantic = KielaClarkSimilarity()
+        training_contents = {**file_content, **dict(additional_contents)}
     else:
-        logger.error("Failed to extract file content.")
-        quit(-1)
+        semantic = LSISimilarity()
+    corpus: dict[str, str] = collect_corpus(all_entities, training_contents)
+    semantic.fit(corpus)
 
     # Run algorithm
     clustering = deicide(children, clients, internal_deps + client_deps, semantic)
