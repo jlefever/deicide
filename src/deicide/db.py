@@ -171,21 +171,19 @@ class DbDriver:
         rows = self._cursor.fetchall()
         return {r[0].hex(): r[1].encode() for r in rows}
 
-    def load_file_content(self, parent_id: str) -> bytes | None:
+    def load_file_content(self, parent_id: str) -> dict[str, bytes]:
         """
         Returns the code content of the file with the given id.
         """
         sql = """
-            SELECT contents.content
+            SELECT contents.content, contents.id
             FROM entities
             JOIN contents ON entities.content_id = contents.id
             WHERE entities.id = ?
         """
         self._cursor.execute(sql, (bytes.fromhex(parent_id),))
         row = self._cursor.fetchone()
-        if row is not None and len(row) == 1:
-            return row[0].encode()
-        return None
+        return {row[1].hex(): row[0].encode()} if row else {}
 
     def _ensure_roots_table(self) -> None:
         """
