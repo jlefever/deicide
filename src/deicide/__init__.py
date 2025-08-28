@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--cutoff-method",
     type=click.Choice(["top_k", "threshold"], case_sensitive=False),
-    default="top_k",
+    default="threshold",
     help="Cutoff method for semantic similarity.",
 )
 def main(
