@@ -1,5 +1,6 @@
 import json
 import logging
+
 # import itertools as it
 from pathlib import Path
 
@@ -48,8 +49,20 @@ logger = logging.getLogger(__name__)
     default="lsi",
     help="Semantic similarity model to use.",
 )
+@click.option(
+    "--cutoff-method",
+    type=click.Choice(["top_k", "threshold"], case_sensitive=False),
+    default="top_k",
+    help="Cutoff method for semantic similarity.",
+)
 def main(
-    input: Path, output: Path, filename: str, commit_hash: str | None, dv8_result: bool, semantic_model: str
+    input: Path,
+    output: Path,
+    filename: str,
+    commit_hash: str | None,
+    dv8_result: bool,
+    semantic_model: str,
+    cutoff_method: str,
 ) -> None:
     # Set up logging
     logging.basicConfig(
@@ -112,7 +125,8 @@ def main(
     file_content_key = next(iter(file_content.keys()))
     num_extra_contents = min(500, len(all_contents) - 1)
     additional_contents = [
-        (content_key, content_value) for content_key, content_value in all_contents.items()
+        (content_key, content_value)
+        for content_key, content_value in all_contents.items()
         if content_key != file_content_key
     ][:num_extra_contents]
     training_contents = {**file_content}
@@ -120,13 +134,19 @@ def main(
     if semantic_model == "kiela_clark":
         semantic = KielaClarkSimilarity()
     else:
-        semantic = LSISimilarity()
+        semantic = LSISimilarity(cutoff_method=cutoff_method)
         training_contents = {**file_content, **dict(additional_contents)}
     corpus: dict[str, str] = collect_corpus(all_entities, training_contents)
     semantic.fit(corpus)
 
     # Run algorithm
-    clustering = deicide(children, clients, internal_deps + client_deps, semantic)
+    clustering = deicide(
+        children,
+        clients,
+        internal_deps + client_deps,
+        semantic,
+        cutoff_method=cutoff_method,
+    )
 
     # Create hex_id to entity mapping (file entities + clients)
     id_to_entity = {entity.id: entity for entity in children}
