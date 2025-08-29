@@ -1,5 +1,7 @@
 import json
 import logging
+
+# import itertools as it
 from pathlib import Path
 
 import click
@@ -8,7 +10,8 @@ from deicide.core import Entity
 from deicide.db import DbDriver
 from deicide.deicide import deicide
 from deicide.dv8 import create_dv8_clustering, create_dv8_dependency
-from deicide.semantic import KielaClarkSimilarity
+from deicide.semantic import KielaClarkSimilarity, LSISimilarity
+from deicide.corpus import collect_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +43,26 @@ logger = logging.getLogger(__name__)
     help="Generate DV8 clustering output (.dv8-clustering.json) and DV8 dependency \
         output",
 )
+@click.option(
+    "--semantic-model",
+    type=click.Choice(["kiela_clark", "lsi"], case_sensitive=False),
+    default="lsi",
+    help="Semantic similarity model to use.",
+)
+@click.option(
+    "--cutoff-method",
+    type=click.Choice(["top_k", "threshold"], case_sensitive=False),
+    default="threshold",
+    help="Cutoff method for semantic similarity.",
+)
 def main(
-    input: Path, output: Path, filename: str, commit_hash: str | None, dv8_result: bool
+    input: Path,
+    output: Path,
+    filename: str,
+    commit_hash: str | None,
+    dv8_result: bool,
+    semantic_model: str,
+    cutoff_method: str,
 ) -> None:
     # Set up logging
     logging.basicConfig(
@@ -96,12 +117,36 @@ def main(
     internal_deps = db_driver.load_internal_deps(parent_id)
     client_deps = db_driver.load_client_deps(parent_id)
 
-    # Create semantic similarity
-    semantic = KielaClarkSimilarity()
-    semantic.fit({e.id: e.name for e in children})
+    # Load all contents and entities
+    file_content = db_driver.load_file_content(parent_id)
+    all_contents = db_driver.load_all_contents()
+    all_entities = db_driver.load_all_entities()
+    # Take 500 contents from all_contents that are not file_content and merge that with file_content
+    file_content_key = next(iter(file_content.keys()))
+    num_extra_contents = min(500, len(all_contents) - 1)
+    additional_contents = [
+        (content_key, content_value)
+        for content_key, content_value in all_contents.items()
+        if content_key != file_content_key
+    ][:num_extra_contents]
+    training_contents = {**file_content}
+    # Create semantic similarity model
+    if semantic_model == "kiela_clark":
+        semantic = KielaClarkSimilarity()
+    else:
+        semantic = LSISimilarity(cutoff_method=cutoff_method)
+        training_contents = {**file_content, **dict(additional_contents)}
+    corpus: dict[str, str] = collect_corpus(all_entities, training_contents)
+    semantic.fit(corpus)
 
     # Run algorithm
-    clustering = deicide(children, clients, internal_deps + client_deps, semantic)
+    clustering = deicide(
+        children,
+        clients,
+        internal_deps + client_deps,
+        semantic,
+        cutoff_method=cutoff_method,
+    )
 
     # Create hex_id to entity mapping (file entities + clients)
     id_to_entity = {entity.id: entity for entity in children}
@@ -113,6 +158,11 @@ def main(
             name=f"(Client) {client.name}",
             parent_id=client.parent_id,
             kind=client.kind,
+            start_byte=client.start_byte,
+            end_byte=client.end_byte,
+            comment_start_byte=client.comment_start_byte,
+            comment_end_byte=client.comment_end_byte,
+            content_id=client.content_id,
         )
         id_to_entity[modified_client.id] = modified_client
 

@@ -42,12 +42,26 @@ class DbDriver:
         sql = "SELECT name, id FROM entities WHERE parent_id IS NULL"
         return {r[0]: r[1].hex() for r in self._cursor.execute(sql)}
 
+    def load_all_entities(self) -> list[Entity]:
+        """
+        Returns all entities in the database
+        """
+        sql = """
+            SELECT id, parent_id, name, kind, start_byte, end_byte,
+            comment_start_byte, comment_end_byte, content_id
+            FROM entities
+        """
+        self._cursor.execute(sql)
+        rows = self._cursor.fetchall()
+        return [self._make_entity(*row) for row in rows]
+
     def load_children(self, entity_id: str) -> list[Entity]:
         """
         Returns the direct children of the entity identified by the given ID.
         """
         sql = """
-            SELECT id, parent_id, name, kind
+            SELECT id, parent_id, name, kind, start_byte, end_byte,
+            comment_start_byte, comment_end_byte, content_id
             FROM entities WHERE parent_id = ?
             ORDER BY start_byte
         """
@@ -92,7 +106,12 @@ class DbDriver:
                 RE.id,
                 RE.parent_id,
                 RE.name,
-                RE.kind
+                RE.kind,
+                RE.start_byte,
+                RE.end_byte,
+                RE.comment_start_byte,
+                RE.comment_end_byte,
+                RE.content_id
             FROM deps D
             JOIN temp.roots SR ON SR.entity_id = D.src
             JOIN entities RE ON RE.id = SR.root_id
@@ -140,6 +159,32 @@ class DbDriver:
         self._cursor.execute(sql, {"pid": pid, "cid": cid})
         return [self._make_dep(*r) for r in self._cursor.fetchall()]
 
+    def load_all_contents(self) -> dict[str, bytes]:
+        """
+        Returns the code content of all the files in the database
+        """
+        sql = """
+            SELECT contents.id, contents.content
+            FROM contents
+        """
+        self._cursor.execute(sql)
+        rows = self._cursor.fetchall()
+        return {r[0].hex(): r[1].encode() for r in rows}
+
+    def load_file_content(self, parent_id: str) -> dict[str, bytes]:
+        """
+        Returns the code content of the file with the given id.
+        """
+        sql = """
+            SELECT contents.content, contents.id
+            FROM entities
+            JOIN contents ON entities.content_id = contents.id
+            WHERE entities.id = ?
+        """
+        self._cursor.execute(sql, (bytes.fromhex(parent_id),))
+        row = self._cursor.fetchone()
+        return {row[1].hex(): row[0].encode()} if row else {}
+
     def _ensure_roots_table(self) -> None:
         """
         Ensures that the temporary 'roots' table exists, which maps each entity
@@ -169,7 +214,16 @@ class DbDriver:
         """)
 
     def _make_entity(
-        self, id: bytes, parent_id: bytes | None, name: str, kind: str
+        self,
+        id: bytes,
+        parent_id: bytes | None,
+        name: str,
+        kind: str,
+        start_byte: int,
+        end_byte: int,
+        comment_start_byte: int | None,
+        comment_end_byte: int | None,
+        content_id: bytes,
     ) -> Entity:
         """
         Constructs an Entity object from database row fields.
@@ -179,6 +233,11 @@ class DbDriver:
             parent_id=parent_id.hex() if parent_id is not None else None,
             name=name,
             kind=kind,
+            start_byte=start_byte,
+            end_byte=end_byte,
+            comment_start_byte=comment_start_byte,
+            comment_end_byte=comment_end_byte,
+            content_id=content_id.hex(),
         )
 
     def _make_dep(self, src_id: bytes, tgt_id: bytes, kind: str) -> Dep:
